@@ -28,6 +28,7 @@ struct VertexOutput {
     @builtin(position) clipPosition: vec4f,
     @location(0) @interpolate(flat) color: vec4f,
     @location(1) @interpolate(flat) isTarget: f32,
+    @location(2) @interpolate(flat) depth: vec4f,
 }
 
 const PI: f32 = 3.14159265359;
@@ -72,10 +73,16 @@ fn vertex(@builtin(vertex_index) index: u32) -> VertexOutput {
         pickedColor = (*point).color;
     }
     output.color = unpack4x8unorm(pickedColor);
+    output.depth = vec4f(1 / linearDepth, 0, 0, 1);
     return output;
 }
 
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4f {
     return input.color.rgba;
+}
+
+@fragment
+fn fragmentWithDepth(input: VertexOutput) -> @location(0) vec4f {
+    return input.depth.rgba;
 }

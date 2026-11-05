@@ -36,7 +36,7 @@ fn compute(@builtin(global_invocation_id) globalId : vec3u,
 
             if (ixj > localIndex && ixj < 256u)
             {
-                let ascending = (localIndex & k) == 0;
+                let ascending = (globalIndex & k) == 0;
                 let currDepth = localPoints[localIndex].depth;
                 let otherDepth = localPoints[ixj].depth;
 

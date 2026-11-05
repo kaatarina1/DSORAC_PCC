@@ -12,7 +12,8 @@ import {
 // deno task capture path/to/save --imgIndex i 
 const args = parseArgs(Deno.args, { string: ["out"] });
 const [outPath] = args._;
-if (!outPath || !args.lasFile || !args.width || !args.height || args.targetX === undefined || args.targetY === undefined || args.targetZ === undefined) {
+const hasTarget = args.targetX !== undefined && args.targetY !== undefined && args.targetZ !== undefined;
+if (!outPath || !args.lasFile || !args.width || !args.height || (!hasTarget && !args.poses)) {
     console.error("Invalid input arguments: deno task capture <outputDir> --lasFile /path/tofile.las --width w --height h --tagetX 0 --targetY 0 --targetZ 0");
     console.error(`deno task capture ${outPath} --lasFile ${args.lasFile} --width ${args.width} --height ${args.height} --tagetX ${args.targetX} --targetY ${args.targetY} --targetZ ${args.targetZ}`);
     Deno.exit(2);
@@ -33,6 +34,8 @@ const type = args.type ?? "fibonacci";
 const results = [];
 const start = performance.now();
 let failed = 0;
+
+const samplingRate = args.samplingRate;
 
 
 if (type === "fibonacci") {
@@ -56,7 +59,8 @@ if (type === "fibonacci") {
             mode: mode,
             useReconstruction: args.useReconstruction === 0 ? false : true,
             pointSize: args.pointSize ?? 0.2,
-            filename: `${String(index).padStart(4, "0")}_${pose[0]}_${pose[1]}_${pose[2]}_${mode}.png`
+            filename: `${String(index).padStart(4, "0")}_${pose[0]}_${pose[1]}_${pose[2]}_${mode}.png`,
+            radiusRatio: args.radiusRatio ?? 1
         };
         try {
             index++;
@@ -78,42 +82,61 @@ if (type === "fibonacci") {
         if (existing) {
             await appendToDataset(existing, results);
         } else {
-            await writeNewDataset(results);
+            await writeNewDataset(results, samplingRate);
         }
     }
 } else {
-    if (args.cameraX === undefined || args.cameraY === undefined || args.cameraZ === undefined) {
-        console.error("For generating images using lookAt option argument camera is mendatory");
-        Deno.exit(2);
+    // --poses file.json: [{ "eye": [x, y, z], "target": [x, y, z] }, ...] rendered in one run
+    let poses;
+    if (args.poses) {
+        poses = JSON.parse(await Deno.readTextFile(args.poses));
+    } else {
+        if (args.cameraX === undefined || args.cameraY === undefined || args.cameraZ === undefined) {
+            console.error("For generating images using lookAt option argument camera (or --poses) is mendatory");
+            Deno.exit(2);
+        }
+        poses = [{ eye: [args.cameraX, args.cameraY, args.cameraZ], target: target }];
     }
 
     const existing = await readTxtIfExists(imagesTxtPath);
+    const startIndex = existing ? Math.max(0, ...parseImageTxt(existing).map((e) => e.imageId)) : 0;
+    if (existing) console.log(`Dataset exists - appending after image ${startIndex}`);
 
-    if (existing === null) {
-        console.error("Dataset is not created yet");
-        Deno.exit(2);
+    let index = startIndex;
+    for (const { eye, target, radiusRatio } of poses) {
+        const task = {
+            imageIndex: index,
+            cameraPosition: eye,
+            targetPosition: target,
+            mode: mode,
+            useReconstruction: args.useReconstruction === 0 ? false : true,
+            pointSize: args.pointSize ?? 0.2,
+            filename: `${String(index).padStart(4, "0")}_${eye[0]}_${eye[1]}_${eye[2]}_${mode}.png`,
+            radiusRatio: radiusRatio ?? args.radiusRatio ?? 1,
+        };
+        try {
+            index++;
+            const { imageIndex, rgba, metadata } = await renderImage(task);
+            const png = encode({ width: metadata.width, height: metadata.height, data: rgba, channels: 4 });
+            await Deno.writeFile(`${outPath}/images/${metadata.filename}`, png);
+            results.push({...metadata, imageId: imageIndex + 1});
+
+            const done = results.length + failed;
+            const elapsed = (performance.now() - start) / 1000;
+            console.log(`✓ ${done}/${poses.length} ${metadata.filename} | ${elapsed.toFixed(1)}s | ~${(elapsed / done * (poses.length - done)).toFixed(0)}s left`);
+        } catch (error) {
+            failed++;
+            console.error(`✗ ${task.filename}:`, (error.cause ?? error).stack);
+        }
     }
-    const entries = parseImageTxt(existing);
-    const imageIndex = Math.max(0, ... entries.map((e) => e.imageId));
 
-    const camera = [args.cameraX, args.cameraY, args.cameraZ];
-    const task = {
-        imageIndex: imageIndex,
-        cameraPosition: camera,
-        targetPosition: target,
-        mode: mode,
-        useReconstruction: args.useReconstruction === 0 ? false : true,
-        pointSize: args.pointSize ?? 0.2,
-        filename: `${String(imageIndex).padStart(4, "0")}_${camera[0]}_${camera[1]}_${camera[2]}_${mode}.png`
-    };
-    const { rgba, metadata } = await renderImage(task);
-    const png = encode({ width: metadata.width, height: metadata.height, data: rgba, channels: 4 });
-    await Deno.writeFile(`${outPath}/images/${metadata.filename}`, png);
-    const entry = {...metadata, imageId: imageIndex + 1};
-    results.push(entry);
-    
-    await appendToDataset(existing, [entry]);
-    console.log(`✓ ${metadata.filename} generated.`);
+    if (results.length > 0) {
+        if (existing) {
+            await appendToDataset(existing, results);
+        } else {
+            await writeNewDataset(results, samplingRate);
+        }
+    }
 }
 
 cleanup();
@@ -137,10 +160,10 @@ function parseImageTxt(imageTxt) {
         .map((e) => ({ imageId: Number(e[0]), filename: e[9] }));
 }
 
-async function writeNewDataset(entries) {
+async function writeNewDataset(entries, samplingRate) {
     await Deno.writeTextFile(camerasTxtPath, writeCamerasTxt(entries));
     await Deno.writeTextFile(imagesTxtPath, writeImagesTxt(entries));
-    await Deno.writeFile(`${sparseDir}/points3D.txt`, writePoints3DTxt(scene.positions, scene.colorsRGB).stream());
+    await Deno.writeFile(`${sparseDir}/points3D.txt`, writePoints3DTxt(scene.positions, scene.colorsRGB, samplingRate).stream());
 }
 
 async function appendToDataset(existing, entries) {

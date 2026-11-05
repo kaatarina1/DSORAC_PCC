@@ -1,11 +1,12 @@
 import { loadShader } from "./LoadShader.js";
 
 export class Composer {
-	constructor(device, width, height, imageIndex = null) {
-        this.imageIndex = imageIndex;
+	constructor(device, width, height, radiusRatio) {
 		this.device = device;
 		this.width = width;
 		this.height = height;
+
+		this.radiusRatio = radiusRatio;
 		
         this.depthPoints = [];
         this.reconstructions = [];
@@ -284,6 +285,12 @@ export class Composer {
 		});
         this.device.queue.writeBuffer(depthsBuffer, 0, new Float32Array(this.depths))
 
+		const radiusRatioBuffer = this.device.createBuffer({
+			size: 4,
+			usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+		});
+        this.device.queue.writeBuffer(radiusRatioBuffer, 0, new Float32Array([this.radiusRatio]))
+
 		const compositePipeline = await this.createCompositePipeline();
 
 		const textureBindGroup = this.device.createBindGroup({
@@ -326,6 +333,10 @@ export class Composer {
 				{
 					binding: 0,
 					resource: { buffer: depthsBuffer },
+				},
+				{
+					binding: 1,
+					resource: { buffer: radiusRatioBuffer },
 				},
 			],
 		});

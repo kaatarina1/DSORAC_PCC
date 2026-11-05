@@ -33,26 +33,27 @@ const CONFIG = {
     // object model
     // hemisphereRadii: [1],
     imagesPerCombination: 50, // 110
-    // lasFile: "./data/pc/ljubljana_1_normals_2.las",
-    // lasFile: "./data/pc/ljubljana_2.las",
+    // lasFile: "./data/pc/ljubljana_1_normals.las",
+    lasFile: "./data/pc/ljubljana_3_normals.las",
     // lasFile: "./data/pc/ljubljana_3.las",
     // lasFile: "./data/pc/ljubljanica_normals.las",
+    // lasFile: "./data/pc/zeleznica_normals.las",
     // lasFile: "./data/pc/bezigrad_normals.las",
     // lasFile: "./data/pc/fri_normals.las",
     // lasFile: "./data/pc/celje_normals.las",
-    // lasFile: "./data/pc/Barn_normals.las",
-    // lasFile: "./data/pc/Truck.las",
+    // lasFile: "./data/pc/barn_normals.las",
+    // lasFile: "./data/pc/truck_normals.las",
     // lasFile: "./data/pc/ljubljana_3_draco_normals.las",
     // lasFile: "./data/pc/ljubljana_3_gpcc_normals.las",
     // lasFile: "./data/pc/bezigrad_draco_normals.las",
     // lasFile: "./data/pc/bezigrad_gpcc_normals.las",
     // lasFile: "./data/pc/lego_draco_normals.las",
     // lasFile: "./data/pc/lego_gpcc_normals.las",
-    lasFile: "./data/pc/Ignatius_normals.las",
-    // tlasFile: "./data/pc/Lego856_PointCloud_v2.las",
+    // lasFile: "./data/pc/ignatius_normals.las",
+    // lasFile: "./data/pc/lego_normals.las",
     targetPositionsAndRadii: [
         // terrestrial
-        // {radii: 60, pos: [0, 15, 0]},
+        {radii: 60, pos: [0, 15, 0]},
         // {radii: 50, pos: [-20, 5, -10]},
         // {radii: 50, pos: [20, 5, -10]},
         // {radii: 50, pos: [-20, 5, 10]},
@@ -71,7 +72,7 @@ const CONFIG = {
         // object model - truck 
         // { radii: 10, pos: [0, 0.5, 0] },
         // object model - statue 
-        { radii: 2.8, pos: [0, 1.3, 0] },
+        //{ radii: 2.8, pos: [0, 1.3, 0] },
         // object model - barn 
         // { radii: 20, pos: [0, 0, 0] },
     ]

@@ -208,19 +208,29 @@ export class DepthMap {
 		// Find peaks
 		const peaks = [];
 		for (let i = 1; i < resolution - 1; i++) {
-			if (smoothed[i] > smoothed[i-1] && smoothed[i] > smoothed[i+1]) {
+			if (smoothed[i] > smoothed[i-1] && smoothed[i] >= smoothed[i+1]) {
 				peaks.push({ depth: actualNear + (i / resolution) * range, density: smoothed[i] });
 			}
 		}
 		peaks.sort((a, b) => b.density - a.density);
 		const topPeaks = peaks.slice(0, numBins).sort((a, b) => a.depth - b.depth);
 
+		const MIN_BIN = 2;
+		let peakDepths = topPeaks.map(p => p.depth);
+		if (peakDepths.length < MIN_BIN) {
+			const sorted = Float32Array.from(linear).sort();
+			peakDepths = [];
+			for (let k = 0; k < MIN_BIN; k++) {
+				peakDepths.push(sorted[Math.floor(((k + 0.5) / MIN_BIN) * (sorted.length - 1))]);
+			}
+		}
+
 		// Voronoi boundaries
-		const merged = topPeaks.map((p, i) => ({
-			start: i === 0 ? near : (topPeaks[i-1].depth + p.depth) / 2,
-			end: i === topPeaks.length - 1 ? far : (p.depth + topPeaks[i+1].depth) / 2,
-			count: Math.round(p.density)
+		const merged = peakDepths.map((d, i) => ({
+			start: i === 0 ? near : (peakDepths[i - 1] + d) / 2,
+			end:   i === peakDepths.length - 1 ? far : (d + peakDepths[i + 1]) / 2,
 		}));
+
 
 		// Razširimo prvega/ zadnjega bina na celoten near/far razpon, da nobena točka ne pade izven pokritosti.
 		const bins = merged.map((b, i) => {

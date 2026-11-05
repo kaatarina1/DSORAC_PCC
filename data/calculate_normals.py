@@ -3,10 +3,12 @@ import numpy as np
 import laspy
 import struct
 import io
+from pathlib import Path
 from scipy.spatial import cKDTree
 
-name = "bezigrad"
-base = "./"
+name = "ljubljana_3"
+# Poti glede na lokacijo skripte (data/pc/), da deluje ne glede na trenutni direktorij
+base = str(Path(__file__).resolve().parent / "pc") + "/"
 
 # Potrebno, da zagotovimo pravilno izvaja tudi če ima LAS datoteka že obstoječe (a napačne/duplikatne) 
 # VLR-je z ekstra dimenzijami, ki bi lahko motili naš izračun normal. 
@@ -116,17 +118,19 @@ print(f"Y: [{points[:,1].min():.2f}, {points[:,1].max():.2f}] ")
 print(f"Z: [{points[:,2].min():.2f}, {points[:,2].max():.2f}] ")
 
 pcd = o3d.geometry.PointCloud()
-pcd.points = o3d.utility.Vector3dVector(points)
+# Točke premaknemo v lokalni izhodišče (origin), ob shranjevanju ga prištejemo nazaj
+pcd.points = o3d.utility.Vector3dVector(points - origin)
 pcd.colors = o3d.utility.Vector3dVector(colors)
 
-# Počistimo outlierje, da ne bodo motili normal
-# pcd, _ = pcd.remove_statistical_outlier(nb_neighbors=64, std_ratio=5.0)
-print(f"After cleaning: {len(pcd.points)} points kept")
+# Počistimo outlierje, da ne bodo motili normal.
+# Indekse ohranimo, da lahko pravilno izberemo tudi klasifikacije preostalih točk.
+# pcd, kept_idx = pcd.remove_statistical_outlier(nb_neighbors=16, std_ratio=3.0)
+# print(f"After cleaning: {len(pcd.points)} points kept")
 
 # Izračun normal na downsampled oblaku, da bo hitreje in stabilneje 
 pcd_down = pcd.voxel_down_sample(voxel_size=0.05) 
 pcd_down.estimate_normals(
-    search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=100.0, max_nn=512)
+    search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=3.0, max_nn=64)
 )
 
 pts = np.asarray(pcd.points)
@@ -137,7 +141,7 @@ z_range = pts[:,2].max() - pts[:,2].min()
 center = pts.mean(axis=0)
 if z_range <= y_range and z_range <= x_range:
     # Z is up (standard LAS)
-    sensor_pos = center + np.array([0, 0, 1000.0])
+    up_axis = np.array([0.0, 0.0, 1.0])
     print("Detected Z-up")
 elif y_range <= x_range and y_range <= z_range:
     up_axis = np.array([0.0, 1.0, 0.0])
@@ -147,12 +151,7 @@ else:
     print("Detected X-up")
 
 pcd_down.orient_normals_consistent_tangent_plane(k=10)
-
-# Po lokalni propagaciji popravimo samo globalni predznak (cel oblak naenkrat),
-# da normale večinoma kažejo navzgor namesto navzdol.
 down_normals = np.asarray(pcd_down.normals)
-if np.mean(down_normals @ up_axis) < 0:
-    pcd_down.normals = o3d.utility.Vector3dVector(-down_normals)
 
 # Na koncu normale razširimo na celoten oblak: vsaki točki dodelimo normalo najbližje downsampled točke
 down_pts = np.asarray(pcd_down.points)
@@ -186,12 +185,12 @@ out.blue  = filtered_colors[:, 2]
 out.nx    = normals[:, 0].astype(np.float32)
 out.ny    = normals[:, 1].astype(np.float32)
 out.nz    = normals[:, 2].astype(np.float32)
-out.classification = las.classification
+out.classification = np.asarray(las.classification)
 
-out.write("./pc/" + name + "_normals_2.las")
-print("Saved → " + name + "_normals_2.las")
+out.write(base + name + "_normals.las")
+print("Saved → " + name + "_normals.las")
 
-las = laspy.read("./pc/" +  name + "_normals_2.las")
+las = laspy.read(base + name + "_normals.las")
 
 print(las.point_format)
 print(las.point_format.dimension_names)

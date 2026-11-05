@@ -1,0 +1,32 @@
+{
+  "canvasWidth": 1024, "canvasHeight": 512,
+  "outputZipName": "lego_DSORAC_full.zip",
+  "lasOrigin": [-2.0, -3.8, 5.2],
+  "models": [
+    {
+      "lasFile": "./data/pc/Lego856_PointCloud_v2.las",
+      "cameras": [
+        { "id": "front_three_quarter", "projection": "PERSPECTIVE",
+          "eye": [-127.0743, 52.3496, 46.2513],
+          "target": [0.0, 16.1149, 0.0],
+          "fovDeg": 22.895193,
+          "technique": "POINTS", "pointSize": 0.1 },
+        { "id": "right_side_high", "projection": "PERSPECTIVE",
+          "eye": [-41.4678, 86.1149, -113.9316],
+          "target": [0.0, 16.1149, 0.0],
+          "fovDeg": 22.895193,
+          "technique": "POINTS", "pointSize": 0.1 },
+        { "id": "left_front_low", "projection": "PERSPECTIVE",
+          "eye": [123.6231, 63.9977, -44.9951],
+          "target": [0.0, 16.1149, 0.0],
+          "fovDeg": 22.895193,
+          "technique": "POINTS", "pointSize": 0.1 },
+        { "id": "top_down_oblique", "projection": "PERSPECTIVE",
+          "eye": [44.9951, 147.6718, 16.3769],
+          "target": [0.0, 16.1149, 0.0],
+          "fovDeg": 22.895193,
+          "technique": "POINTS", "pointSize": 0.1 }
+      ]
+    }
+  ]
+}

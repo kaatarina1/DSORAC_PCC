@@ -134,9 +134,8 @@ export function writeImagesTxt(captured, scaleFactor = 1.0) {
 
 // Vrne Blob namesto enega dolgega niza, ker pri milijonih
 // točk .join() na enem samem nizu porabi ogromno pomnilnika.
-export function writePoints3DTxt(positions, colors, scaleFactor = 1.0) {
+export function writePoints3DTxt(positions, colors, samplingRate = 100, scaleFactor = 1.0) {
 	const totalPoints = positions.length / 3;
-	const samplingRate = 10; // Vyorčimo vsak 5. point 
 	
 	console.log(`Writing points3D.txt with scale factor: ${scaleFactor}, sampling rate: ${samplingRate} (from ${totalPoints} points)`);
 

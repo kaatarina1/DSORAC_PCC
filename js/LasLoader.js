@@ -159,7 +159,7 @@ export class LasLoader {
                 const nx = pointBuffer.getFloat32(normalOffset.x, true);
                 const nz = -pointBuffer.getFloat32(normalOffset.y, true);
                 const ny = pointBuffer.getFloat32(normalOffset.z, true);
-                normals.set([nx, nz, ny], i * 3);
+                normals.set([nx, ny, nz], i * 3);
             }
             
             classifications[i] = pointBuffer.getUint8(classOffset);

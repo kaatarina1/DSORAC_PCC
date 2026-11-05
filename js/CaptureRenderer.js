@@ -77,7 +77,25 @@ let numberOfAllPoints = 0;
 
 export async function initRenderer(config) {
     console.log('🔧 Worker initializing GPU...');
-    const adapter = await navigator.gpu.requestAdapter();
+    // Na Windows Deno privzeto izbere Vulkan, kjer wgpu pri preverjanju budgeta upošteva
+    // tudi majhne NVIDIA heap-e (32 MB) in zavrne vsako večjo alokacijo
+    // ("not enough memory left" -> izguba naprave). DX12 tega problema nima,
+    // zato ga nastavimo vedno, tudi če je v okolju ostal npr. "vulkan".
+    if (Deno.build.os === "windows") {
+        Deno.env.set("DENO_WEBGPU_BACKEND", "dx12");
+        // Privzeti FXC prevajalnik potrebuje ~3 min za sorting shaderje, DXC pa nekaj sekund.
+        // dxcompiler.dll se naloži preko PATH, zato dodamo tools/dxc.
+        const dxcDir = new URL("../tools/dxc/", import.meta.url);
+        let hasDxc = false;
+        try { hasDxc = Deno.statSync(new URL("dxcompiler.dll", dxcDir)).isFile; } catch { /* ni DXC */ }
+        if (hasDxc && !Deno.env.get("DENO_WEBGPU_DX12_COMPILER")) {
+            const dxcPath = decodeURIComponent(dxcDir.pathname).replace(/^\/([A-Za-z]:)/, "$1");
+            Deno.env.set("PATH", `${dxcPath};${Deno.env.get("PATH") ?? ""}`);
+            Deno.env.set("DENO_WEBGPU_DX12_COMPILER", "dxc");
+        }
+        console.log(`🔧 WebGPU backend: dx12, shader compiler: ${Deno.env.get("DENO_WEBGPU_DX12_COMPILER") ?? "fxc"}`);
+    }
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
 
     // Nekateri oblaki točk (npr. ljubljana_2/3) imajo toliko točk, da depthStorageBuffer
     // v DepthMap (nPoints * 4 bajtov, brez chunkanja) preseže privzeti
@@ -111,6 +129,7 @@ export async function initRenderer(config) {
         vertex: { module: renderingModule },
         fragment: {
             module: renderingModule,
+            entryPoint: "fragment",
             targets: [{ format: format }],
         },
         primitive: { topology: "point-list" },
@@ -384,6 +403,7 @@ export async function renderImage(params, { onProgress } = {}) {
             mode = "POINTS",
             pointSize = 0.01,
             fovDeg = 45,
+            radiusRatio = 1,
         } = params;
 
         let pipeline;
@@ -454,7 +474,7 @@ export async function renderImage(params, { onProgress } = {}) {
             });
 
             // Za vsako sliko naredimo novo instanco composer razreda
-            const composer = new Composer(device, canvas.width, canvas.height, imageIndex);
+            const composer = new Composer(device, canvas.width, canvas.height, radiusRatio);
             
             // Zagotovimo, da Composer začne s čistimi podatki
             composer.reconstructions = [];
@@ -905,6 +925,11 @@ function prewarmMergeBuffers(maxN) {
     }
 }
 
+function nextPow2(n) {
+    if (n <= 0) return 1;
+    return Math.pow(2, Math.floor(Math.log2(n)) + 1);
+}
+
 // Vstvari binding groupe za sortiranje - priprava, lokalno sortiranje in globalno sortiranje
 function buildSortBindGroups(pointcloud) {
     if (!preparationPipeline || !localSortPipeline || !globalSortPipeline) {
@@ -912,6 +937,7 @@ function buildSortBindGroups(pointcloud) {
     }
 
     const n = pointcloud.numberOfPoints;
+    const N = Math.max(256, nextPow2(n));
 
     // Reusable view matrix buffer
     pointcloud.prepViewBuffer = device.createBuffer({
@@ -922,7 +948,7 @@ function buildSortBindGroups(pointcloud) {
         size: 4,
         usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    device.queue.writeBuffer(numBuf, 0, new Uint32Array([n]));
+    device.queue.writeBuffer(numBuf, 0, new Uint32Array([N]));
 
     // Flag, ki pove preparation shaderju, ali gre za sferičen (panoramski) zajem -
     // v tem primeru prepViewBuffer vsebuje view matriko (ne projekcijsko), zato
@@ -980,7 +1006,8 @@ function sortPointCloud(pointcloud, viewMatrix, isSpherical = false) {
     }
 
     const n = pointcloud.numberOfPoints;
-    const numWorkgroups = Math.ceil(n / 256);
+    const N = Math.max(256, nextPow2(n));
+    const numWorkgroups = Math.ceil(N / 256);
 
     console.log(`sorting: numberOfPoints=${pointcloud.numberOfPoints}, paddedSize=${n}, ratio=${n/pointcloud.numberOfPoints}`);
 
@@ -1013,7 +1040,7 @@ function sortPointCloud(pointcloud, viewMatrix, isSpherical = false) {
     encoder = device.createCommandEncoder();
     pass = encoder.beginComputePass();
     pass.setPipeline(globalSortPipeline);
-    for (let k = 512; k <= n * 2; k *= 2) {
+    for (let k = 512; k <= N; k *= 2) {
         for (let j = k / 2; j >= 1; j = Math.floor(j / 2)) {
             const key = k * 100000 + j;
             pass.setBindGroup(0, pointcloud.globalSortBGs.get(key));
@@ -1036,7 +1063,7 @@ function getBatchDepth(pointcloud, projectionViewMatrix, isSpherical = false, ca
     const m = projectionViewMatrix;
     const clipZ = m[2]*px + m[6]*py + m[10]*pz + m[14];
     const clipW = m[3]*px + m[7]*py + m[11]*pz + m[15];
-    return clipZ / clipW;
+    return clipZ / clipW >= 0 ? clipZ / clipW : 10000;
 }
 
 export function cleanup() {

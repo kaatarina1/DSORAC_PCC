@@ -1,0 +1,41 @@
+{
+  "canvasWidth": 1024, "canvasHeight": 512,
+  "outputZipName": "ljubljana_DSORAC_full.zip",
+  "models": [
+    {
+      "lasFile": "./data/pc/ljubljana_1.las",
+      "cameras": [
+        { "id": "shot001", "projection": "SPHERICAL", "eye": [23.57, 6.26, -13.11], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 290 },
+        { "id": "shot005", "projection": "SPHERICAL", "eye": [-8.02, 7.25, -24.43], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 307 },
+        { "id": "shot009", "projection": "SPHERICAL", "eye": [4.38, 6.52, -19.0], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 286 }
+      ]
+    },
+    {
+      "lasFile": "./data/pc/ljubljana_2.las",
+      "cameras": [
+        { "id": "shot001", "projection": "SPHERICAL", "eye": [-15.24, 12.7, -19.04], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 104 },
+        { "id": "shot005", "projection": "SPHERICAL", "eye": [6.1, 11.6, -17.93], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 26 },
+        { "id": "shot009", "projection": "SPHERICAL", "eye": [13.25, 11.8, 24.78], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 180 },
+        { "id": "shot009", "projection": "SPHERICAL", "eye": [7.29, 11.5, -27.46], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 181 }
+      ]
+    },
+    {
+      "lasFile": "./data/pc/ljubljana_3.las",
+      "cameras": [
+        { "id": "shot001", "projection": "SPHERICAL", "eye": [13.71, 6.42, 1.55], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 290 },
+        { "id": "shot005", "projection": "SPHERICAL", "eye": [21.03, 6.46, 4.2], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 290 },
+        { "id": "shot009", "projection": "SPHERICAL", "eye": [12.95, 6.42, 5.11], "target": [0,0,0],
+          "technique": "POINTS", "pointSize": 0.2, "yawDeg": 110 }
+      ]
+    }
+  ]
+}

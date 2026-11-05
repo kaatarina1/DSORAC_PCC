@@ -1,0 +1,13 @@
+{
+  "canvasWidth": 1024, "canvasHeight": 1024,
+  "outputZipName": "CLSS_DSORAC_full.zip",
+  "models": [
+    {
+      "lasFile": "./data/pc/bezigrad_normals.las",
+      "cameras": [
+        { "id": "bezigrad_disks", "projection": "ORTHOGRAPHIC", "eye":[0, 0, 0], "eyeY": 440, "panX": 0, "panZ": 0, "zoom": 125.5,
+          "technique": "POINTS", "pointSize": 0.2 }
+      ]
+    }
+  ]
+}
