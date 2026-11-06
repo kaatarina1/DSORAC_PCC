@@ -1,0 +1,5 @@
+[submodule "gaussian-splatting"]
+	path = gaussian-splatting
+	url = https://github.com/kaatarina1/gaussian-splatting.git
+	branch = pcc
+	ignore = dirty
