@@ -328,7 +328,8 @@ def runGaussianSplattin(model_path, out, checkpoint = -1, checkpoint_model = "",
         conda, "run", "-n", "gaussian_splatting", "--no-capture-output",
         "python", "./gaussian-splatting/train.py", "-s", out, "-m", model_path,
         "--random_background", "--disable_viewer", "--sh_degree", str(sh_degree),
-        "--test_iterations", "-1",
+        "--test_iterations", "-1", "--position_lr_max_steps", "35000",
+        "--densify_grad_threshold", "0.001",
     ]
     if (checkpoint != -1):
         cmd.append("--checkpoint_iterations")
