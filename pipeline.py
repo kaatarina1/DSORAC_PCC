@@ -425,10 +425,25 @@ def calculateQuality(scores, metric, names):
     else: per_view = -v
     return float(per_view.mean()), float(np.percentile(per_view, 10))
 
+def measure_views(model_path, checkpoint, data_dir, save_maps=False):
+    # Renders and computes the psnr error in one GPU process, without writing renders / gt PNGs
+    conda = os.environ.get("CONDA_EXE", "conda")
+    cmd = [
+        conda, "run", "-n", "gaussian_splatting", "--no-capture-output",
+        "python", "./gaussian_splatting_utils/measure_views.py", "-s", data_dir, "-m", model_path,
+        "--iteration", str(checkpoint),
+    ]
+    if not save_maps:
+        cmd.append("--no_maps")
+    subprocess.run(cmd, check=True)
+
 def measure(model_path, checkpoint, data_dir, metric, names=None, save_maps=False):
     method_dir = Path(model_path, "train", f"ours_{checkpoint}")
-    renderGaussianSplattin(model_path, checkpoint, data_dir)
-    evaluateGaussianSplatting(method_dir, metric, save_maps=save_maps)
+    if metric == "psnr":
+        measure_views(model_path, checkpoint, data_dir, save_maps=save_maps)
+    else:   # TODO: ssim / lpips are not ported to the GPU path yet
+        renderGaussianSplattin(model_path, checkpoint, data_dir)
+        evaluateGaussianSplatting(method_dir, metric, save_maps=save_maps)
     scores = json.loads((method_dir / "scores.json").read_text())
     names = names if names is not None else sorted(scores)
     q, p10 = calculateQuality(scores, metric, names)
