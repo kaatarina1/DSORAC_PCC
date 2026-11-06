@@ -14,7 +14,7 @@ import math
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gaussian-splatting"))
 
 import numpy as np
 import torch
@@ -23,7 +23,7 @@ from PIL import Image
 from scene.cameras import MiniCam
 from gaussian_renderer import render
 from utils.graphics_utils import getWorld2View2, getProjectionMatrix
-from utils.render_equirect import look_rotation, load_gaussians, render_panorama, render_rgba
+from render_equirect import look_rotation, load_gaussians, render_panorama, render_rgba
 
 
 def make_perspective_camera(eye, target, width, height, fovy, znear=0.01, zfar=1000.0):

@@ -8,13 +8,16 @@ from pathlib import Path
 import json
 import shutil
 
+def gaussianBytes(sh_degree):
+    return 13 + 3 * ((sh_degree + 1) ** 2 - 1)
+
 def lasOrigin(path):
     # Scene origin as in js/LasLoader.js (all points, no outlier removal): x/z centre, lowest y
     las = laspy.read(path)
     x, y, z = np.asarray(las.x), np.asarray(las.z), -np.asarray(las.y)
     return np.array([(x.min() + x.max()) / 2, y.min(), (z.min() + z.max()) / 2])
 
-def evaluate(model_path, las_file, eval_dir):
+def evaluate(model_path, las_file, eval_dir, sh_degree=3):
     # eval_dir holds eval.json and the GT images / masks it names, any mix of
     # PERSPECTIVE / ORTHOGRAPHIC / SPHERICAL cameras. Results go to <model_path>/eval/iteration_<n>.
     config_path = Path(eval_dir, "eval.json")
@@ -27,7 +30,8 @@ def evaluate(model_path, las_file, eval_dir):
     subprocess.run([
         conda, "run", "-n", "gaussian_splatting", "--no-capture-output",
         "python", "./gaussian_splatting_utils/render_views.py",
-        "-m", model_path, "--config", str(config_path), "--out_dir", str(out_dir), "--offset", *map(str, offset)
+        "-m", model_path, "--config", str(config_path), "--out_dir", str(out_dir), "--offset", *map(str, offset),
+        "--sh_degree", str(sh_degree)
     ], check=True)
     subprocess.run(["python", "./gaussian_splatting_utils/eval_views.py", str(out_dir), str(config_path)], check=True)
     return json.loads((out_dir / "metrics_views.json").read_text())
@@ -46,12 +50,12 @@ def readGaussianPly(path):
         gauss = np.fromfile(f, dtype=[(n, "<f4") for n in names])
         return gauss
 
-def compressionRatio(las_file, model_path):
-    # size per point = 8, size per gaussian = 58
+def compressionRatio(las_file, model_path, sh_degree=3):
     points = pointCount(las_file)
     gaussians = len(readGaussianPly(latestGaussianPly(model_path)))
-    ratio = (points * 8) / (gaussians * 58)
-    print(f"Compression ratio: {points} points * 8 / {gaussians} gaussians * 58 = {ratio:.3f}")
+    byts = gaussianBytes(sh_degree)
+    ratio = (points * 8) / (gaussians * byts)
+    print(f"Compression ratio: {points} points * 8 / {gaussians} gaussians * {byts} = {ratio:.3f}")
     return ratio
 
 def gaussianCount(model_path):

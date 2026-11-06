@@ -17,7 +17,7 @@ import math
 import argparse
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gaussian-splatting"))
 
 import numpy as np
 import torch
@@ -79,12 +79,29 @@ def render_panorama(gaussians, position, yaw_deg=0.0, width=2048, height=None,
     pos = np.array(position, dtype=np.float64)
     fov = math.radians(fov_deg)
 
+    # The CUDA rasterizer draws every splat in front of the camera, even when its centre lies far outside the
+    # face; it clamps such splats to the image border and stretches them into haze and streaks. Like the web
+    # viewer, each face hides splats whose centre is outside 1.2x its frustum (|x/z|, |y/z| < 1.2 tan(fov/2)).
+    # The cube faces cover the whole sphere, so every splat is still drawn in the face that contains its centre.
+    xyz = gaussians.get_xyz
+    eye = torch.tensor(pos, dtype=torch.float32, device="cuda")
+    cull_lim = 1.2 * math.tan(fov / 2)
+    opacity_backup = gaussians._opacity.data.clone()
+
     faces, rots = [], []
     for d, u in zip(dirs, ups):
         R = look_rotation(d, u)
-        img = render_rgba(make_camera(R, pos, face, fov), gaussians, pipe, bg)   # 4xSxS
+        Rt = torch.tensor(R, dtype=torch.float32, device="cuda")
+        c = (xyz - eye) @ Rt.T                              # splat centres in this face's camera frame
+        z = c[:, 2]
+        keep = (z > 0.01) & ((c[:, 0] / z).abs() < cull_lim) & ((c[:, 1] / z).abs() < cull_lim)
+        gaussians._opacity.data[~keep] = -20.0              # sigmoid(-20) ~ 2e-9, skipped by the rasterizer
+        try:
+            img = render_rgba(make_camera(R, pos, face, fov), gaussians, pipe, bg)   # 4xSxS
+        finally:
+            gaussians._opacity.data.copy_(opacity_backup)    # next face starts from the original opacities
         faces.append(img.clamp(0, 1))
-        rots.append(torch.tensor(R, dtype=torch.float32, device="cuda"))
+        rots.append(Rt)
 
     # Equirectangular directions: top row = straight up, centre column = yaw direction
     lon = (torch.arange(width, device="cuda") + 0.5) / width * 2 * math.pi - math.pi

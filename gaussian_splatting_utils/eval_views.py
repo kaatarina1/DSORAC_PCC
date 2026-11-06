@@ -24,7 +24,7 @@ import lpips
 import matplotlib.pyplot as plt
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "gaussian-splatting"))
 from eval_panoramas import compute_metrics, error_maps, load_mask
 
 # Error that maps to the brightest colour: squared error 0.25 = colour off by 0.5, SSIM and LPIPS errors in [0, 1]

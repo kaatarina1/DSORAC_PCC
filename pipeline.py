@@ -8,7 +8,7 @@ import json
 import shutil
 import time
 from contextlib import contextmanager
-from render_eval import compressionRatio, evaluate, gaussianCount, pointCount
+from render_eval import compressionRatio, evaluate, gaussianCount, pointCount, gaussianBytes
 import optimization_util as opt_util
 
 FOV = 45
@@ -128,7 +128,7 @@ def readPointCloud(path):
     return xyz, rgb, bbMin, bbMax, normals
 
 def writePoints3D(path, xyz, rgb, sampling_rate):
-    idx = np.arange(0, len(xyz), sampling_rate)
+    idx = np.arange(0, len(xyz), sampling_rate).astype(int)
     colors = np.round(rgb[idx] * 255)
     rows = np.column_stack([np.arange(len(idx)), xyz[idx], colors, np.zeros(len(idx))])
     with open(path, "w") as f:
@@ -301,7 +301,7 @@ def prepareDataset(lasFile, base_dir, work_dir, halfV, xyz, rgb, bbMin, bbMax, s
     params = {"lasFile": str(Path(lasFile).resolve()), "W": W, "H": H, "FOV": FOV}
     marker = Path(base_dir, "dataset_params.json")
     if regenerate or not marker.exists() or json.loads(marker.read_text()) != params:
-        generateDataset(lasFile, base_dir, halfV, xyz, rgb, bbMin, bbMax, sampling_rate)
+        generateDataset(lasFile, base_dir, halfV, xyz, rgb, bbMin, bbMax, max(1, int(sampling_rate)))
         marker.write_text(json.dumps(params, indent=2))
     else:
         print(f"Reusing dataset {base_dir}")
@@ -316,15 +316,20 @@ def prepareDataset(lasFile, base_dir, work_dir, halfV, xyz, rgb, bbMin, bbMax, s
     for img in (src / "images").iterdir():
         os.link(img, dst / "images" / img.name)
 
-def runGaussianSplattin(model_path, out, checkpoint = -1, checkpoint_model = "", iterations = []):
+def cleanIteration(model_path, iteration):
+    Path(model_path, f"chkpnt{iteration}.pth").unlink(missing_ok=True)
+    shutil.rmtree(Path(model_path, "point_cloud", f"iteration_{iteration}"), ignore_errors=True)
+
+def runGaussianSplattin(model_path, out, checkpoint = -1, checkpoint_model = "", iterations = [], sh_degree=3):
     # Na Windows je "conda" v PATH le conda.bat, ki ga subprocess brez shell-a ne najde,
     # zato uporabimo pravi conda.exe iz CONDA_EXE (nastavljen v aktiviranem okolju).
     conda = os.environ.get("CONDA_EXE", "conda")
     cmd = [
         conda, "run", "-n", "gaussian_splatting", "--no-capture-output",
         "python", "./gaussian-splatting/train.py", "-s", out, "-m", model_path,
-        "--random_background", "--disable_viewer"
-    ]        # "--densify_until_iter 25_000", "--las_file ", path
+        "--random_background", "--disable_viewer", "--sh_degree", str(sh_degree),
+        "--test_iterations", "-1",
+    ]
     if (checkpoint != -1):
         cmd.append("--checkpoint_iterations")
         cmd.append(str(checkpoint))
@@ -356,7 +361,7 @@ def evaluateGaussianSplatting(method_dir, metric, save_maps=False):
         cmd.append("--no_maps")
     subprocess.run(cmd, check=True)
 
-def pruneGaussians(checkpoint, out, size_factor=(0.05, 2), min_opacity=0.2):
+def pruneGaussians(checkpoint, out, size_factor=(0.05, 2), min_opacity=0.2, n_target=-1, seed=0):
     checkpoint_path = f"{out}/chkpnt{checkpoint}.pth"
     ply_path = f"{out}/point_cloud/iteration_{checkpoint}/point_cloud.ply"
     conda = os.environ.get("CONDA_EXE", "conda")
@@ -369,6 +374,8 @@ def pruneGaussians(checkpoint, out, size_factor=(0.05, 2), min_opacity=0.2):
         "--size_factor_min", str(size_factor[0]),
         "--size_factor_max", str(size_factor[1]),
         "--min_opacity", str(min_opacity),
+        "--target_count", str(n_target),
+        "--seed", str(seed)
     ]
     subprocess.run(cmd, check=True)
 
@@ -466,28 +473,32 @@ def main():
     parser.add_argument("--max_loops", type=int, default=10, help="Upper limit for loop rounds.")
     parser.add_argument("--compression_ratio", type=float, default=1, help="Target compression ratio r*.")
     parser.add_argument("--ratio_tol", type=float, default=0.01, help="r may be this much below r*.")
+    parser.add_argument("--sh_degree", type=int, choices=[0, 1, 2, 3], default=3,
+                    help="Max SH degree of the Gaussians.")
 
     args = parser.parse_args()
     halfV = np.deg2rad(FOV / 2)
     halfH = np.arctan(np.tan(halfV) * W / H)
 
+    gs_bytes = gaussianBytes(args.sh_degree)
+
     name = Path(args.lasFile).stem
     base_dir = str(Path(args.work_root, name))
     data_dir = f"{base_dir}_work"
-    model_path = str(Path(args.work_root, "output", name))
+    model_path = str(Path(args.work_root, "output", f"{name}_sh{args.sh_degree}_cr{int(args.compression_ratio)}"))
     timer = StageTimer(Path(model_path, "timings.json"))
 
     with timer.stage("read_point_cloud"):
         xyz, rgb, bbMin, bbMax, normals = readPointCloud(args.lasFile)
 
-    sampling_rate = max(1, round(7.25 * args.compression_ratio))
+    sampling_rate = gs_bytes / 8 * args.compression_ratio
 
     with timer.stage("prepare_dataset", regenerate=args.regenerate):
         prepareDataset(args.lasFile, base_dir, data_dir, halfH, xyz, rgb, bbMin, bbMax, sampling_rate, args.regenerate)
 
     checkpoint = 17_000
     with timer.stage("train_initial", iterations=checkpoint):
-        runGaussianSplattin(model_path, data_dir, checkpoint, iterations=[checkpoint])
+        runGaussianSplattin(model_path, data_dir, checkpoint, iterations=[checkpoint], sh_degree=args.sh_degree)
 
     np.save(Path(model_path, "points.npy"), xyz)
     np.save(Path(model_path, "colors.npy"), rgb.astype(np.float32))
@@ -498,7 +509,7 @@ def main():
     eval_dir = Path(args.eval_dir or Path(args.work_root, f"{name}_eval"))
     if (eval_dir / "eval.json").exists():
         with timer.stage("evaluate_gt", checkpoint=checkpoint):
-            evaluate(model_path, args.lasFile, eval_dir)
+            evaluate(model_path, args.lasFile, eval_dir, args.sh_degree)
 
     n_base = len(list(Path(data_dir, "images").glob("*.png")))   # before any captureViews
     base_names = [f"{i:05d}" for i in range(n_base)]
@@ -512,9 +523,11 @@ def main():
     new_factor = 0.1
     n_views = 20
     summary_path = Path(model_path, "loop_summary.json")
-    for loop in range(args.max_loops + 1):
+    n_points = pointCount(args.lasFile)
+    n_target = int(n_points * 8 / (gs_bytes * args.compression_ratio))
+    for loop in range(args.max_loops):
         loop_start = time.perf_counter()
-        r = compressionRatio(args.lasFile, model_path)
+        r = compressionRatio(args.lasFile, model_path, args.sh_degree)
         with timer.stage("measure", loop=loop, checkpoint=checkpoint):
             q, p10, _, method_dir = measure(model_path, checkpoint, data_dir, args.error_metric, names=base_names, save_maps=True)
         N = gaussianCount(model_path)
@@ -523,24 +536,20 @@ def main():
         phase = "improve" if r_ok else "compress"
         history.append({"loop": loop, "checkpoint": checkpoint, "phase": phase,
                     "N": N, "r": r, "q": q, "p10": p10, "min_opacity": min_opacity})
-        print_round(history[-1], args.error_metric)
-
-        if stalled(history):
-            reason = f"No progression - quality converged {phase}" 
-            break
-        if loop == args.max_loops:
-            reason = f"Max iteration reached - achieved compression {r}" 
-            break      
+        print_round(history[-1], args.error_metric)   
 
         with timer.stage("prune", loop=loop, phase=phase):
             if phase == "compress":
-                pruneGaussians(checkpoint, model_path, size_factor, min_opacity)
-                size_factor = (size_factor[0] * 1.1 if size_factor[0] < 0.2 else 0.2, size_factor[1])
-                min_opacity = min_opacity * 1.1 if min_opacity < 0.49 else 0.5
+                if loop >= 2:
+                    pruneGaussians(checkpoint, model_path, size_factor, min_opacity, n_target, loop)
+                else: 
+                    pruneGaussians(checkpoint, model_path, size_factor, min_opacity)
+                size_factor = (size_factor[0] * 1.2 if size_factor[0] < 0.1 else 0.1, size_factor[1])
+                min_opacity = min_opacity * 1.3 if min_opacity < 0.49 else 0.5
                 count = gaussianCount(model_path)
                 n_removed = N - count
                 add_frac = new_factor * n_removed / count
-                new_factor = new_factor - 0.01 if new_factor > 0 else 0 
+                new_factor = new_factor - 0.03 if new_factor > 0 else 0 
                 n_views = 10
             else:
                 pruneGaussians(checkpoint, model_path, (0.02, 4), 0.15)
@@ -572,17 +581,29 @@ def main():
 
         with timer.stage("train", loop=loop, start=checkpoint, end=checkpoint + 3_000):
             runGaussianSplattin(model_path, data_dir, checkpoint + 3_000,
-                                f"{model_path}/chkpnt{checkpoint}.pth", [checkpoint + 3_000])
+                                f"{model_path}/chkpnt{checkpoint}.pth", [checkpoint + 3_000], sh_degree=args.sh_degree)
+        cleanIteration(model_path, checkpoint)
         checkpoint += 3_000
 
         if (eval_dir / "eval.json").exists():
             with timer.stage("evaluate_gt", loop=loop, checkpoint=checkpoint):
-                evaluate(model_path, args.lasFile, eval_dir)
+                evaluate(model_path, args.lasFile, eval_dir, args.sh_degree)
 
         history[-1]["seconds"] = round(time.perf_counter() - loop_start, 2)
         print(f"[time] loop {loop}: {history[-1]['seconds']:.1f}s", flush=True)
         summary_path.write_text(json.dumps({"history": history}, indent=2))
+        
+        if stalled(history):
+            reason = f"No progression - quality converged {phase}" 
+            break
+        if loop == args.max_loops - 1:
+            reason = f"Max iteration reached - achieved compression {r}" 
+            break   
 
+    Path(model_path, f"chkpnt{checkpoint}.pth").unlink(missing_ok=True)
+    for f in ["points.npy", "colors.npy", "normals.npy", *Path(model_path).glob("add_idx_loop*.npy"),
+                *Path(model_path).glob("events.out.tfevents.*")]:
+        Path(model_path, f).unlink(missing_ok=True)
     print_summary(history, reason, args.compression_ratio, r_low, args.error_metric, summary_path)
     timer.save()
     timer.print_summary()
