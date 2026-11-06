@@ -62,9 +62,24 @@ def render_rgba(view, gaussians, pipe, bg):
     return torch.cat([img, alpha])
 
 
+def rotate_frame(fwd, right, up, rotation_fix_deg):
+    """Tilt the camera frame by a small rotation vector given in degrees in the camera's own (forward, right, up)
+    axes, i.e. [roll, pitch, yaw]. It is applied as one rotation (Rodrigues' formula), exactly as the pose
+    alignment fitted it, so the result does not depend on an order of roll / pitch / yaw."""
+    w = np.radians(np.asarray(rotation_fix_deg, dtype=np.float64))
+    angle = np.linalg.norm(w)
+    if angle == 0:
+        return fwd, right, up
+    k = w / angle
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    R = np.eye(3) + math.sin(angle) * K + (1 - math.cos(angle)) * K @ K
+    fwd, right, up = R @ np.stack([fwd, right, up])      # rows of R @ B are the corrected camera axes in world
+    return fwd, right, up
+
+
 def render_panorama(gaussians, position, yaw_deg=0.0, width=2048, height=None,
-                    face=1024, fov_deg=120.0, white_background=False):
-    """Returns a 4xHxW tensor (RGB + alpha) in [0, 1]."""
+                    face=1024, fov_deg=120.0, white_background=False, rotation_fix_deg=(0.0, 0.0, 0.0)):
+    """Returns a 4xHxW tensor (RGB + alpha) in [0, 1]. rotation_fix_deg = [roll, pitch, yaw] tilt correction."""
     height = height or width // 2
     pipe = argparse.Namespace(convert_SHs_python=False, compute_cov3D_python=False, debug=False, antialiasing=False)
     bg = torch.tensor([1., 1., 1.] if white_background else [0., 0., 0.], device="cuda")
@@ -74,6 +89,7 @@ def render_panorama(gaussians, position, yaw_deg=0.0, width=2048, height=None,
     yaw = math.radians(yaw_deg)
     fwd = np.array([math.sin(yaw), 0., -math.cos(yaw)])
     right = np.cross(fwd, up)
+    fwd, right, up = rotate_frame(fwd, right, up, rotation_fix_deg)
     dirs = [fwd, -fwd, right, -right, up, -up]
     ups = [up, up, up, up, -fwd, fwd]
     pos = np.array(position, dtype=np.float64)

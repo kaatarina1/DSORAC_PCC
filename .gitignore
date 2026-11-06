@@ -1,15 +1,27 @@
-node_modules
+# dependencies and external tools
+node_modules/
 package-lock.json
+tools/dxc/
+
+# data, generated datasets and results
+data/
+output/
 *.las
 *.laz
-*.txt
-.vscode
-js/temp.js
 *.ply
-*.zip
-.DS_Store
-.idea
-segmentation
 *.bin
 *.drc
-data
+*.zip
+*.pth
+*.npy
+
+# Python, editors, OS
+__pycache__/
+.vs/
+.vscode/
+.idea/
+.DS_Store
+
+# misc
+js/temp.js
+segmentation

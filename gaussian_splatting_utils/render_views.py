@@ -2,7 +2,8 @@
 
 Cameras use the viewer convention (js/CameraPosition.js): PERSPECTIVE is look-at from eye to target, up = +Y,
 fovDeg is the vertical FOV; ORTHOGRAPHIC is top-down (zoom, panX, panZ); SPHERICAL is an equirectangular
-panorama at eye, rotated by yawDeg. Every view is rendered at the resolution of its ground truth image
+panorama at eye, rotated by yawDeg and optionally tilted by rotationFixDeg = [roll, pitch, yaw] in degrees
+(a measured correction of the real camera's tilt, see render_equirect.rotate_frame). Every view is rendered at the resolution of its ground truth image
 (<config dir>/<gt>), so the two line up pixel for pixel, or at evalWidth (same aspect) if the config sets it.
 
 python gaussian-splatting/utils/render_views.py -m output/lego_normals --config data/lego_normals_eval/eval.json
@@ -83,7 +84,8 @@ def main():
             if projection == "SPHERICAL":
                 # Cube faces span 120 deg (overlapping, so the seams are blended), this keeps the panorama's pixel density
                 img = render_panorama(gaussians, np.add(cam["eye"], offset), cam.get("yawDeg", 0.0), w, h,
-                                      face=math.ceil(w * 120 / 360), fov_deg=120, white_background=a.white_background)
+                                      face=math.ceil(w * 120 / 360), fov_deg=120, white_background=a.white_background,
+                                      rotation_fix_deg=cam.get("rotationFixDeg", (0.0, 0.0, 0.0)))
             else:
                 if projection == "ORTHOGRAPHIC":
                     view = make_ortho_topdown_camera(cam, offset, w, h, cfg["canvasWidth"] / cfg["canvasHeight"])
