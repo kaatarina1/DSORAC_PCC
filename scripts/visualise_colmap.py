@@ -146,7 +146,10 @@ def visualize_cameras(cameras, output_path=None):
     plt.show()
 
 def main():
-    images_path = os.path.join(os.path.dirname(__file__), 'images.txt')
+    parser = argparse.ArgumentParser(description="Plot the cameras of a COLMAP images.txt")
+    parser.add_argument("images_txt", nargs="?", default=os.path.join(os.path.dirname(__file__), 'images.txt'),
+                        help="e.g. data/<scene>/sparse/0/images.txt (default: images.txt next to this script)")
+    images_path = parser.parse_args().images_txt
     
     print("Parsing COLMAP images.txt file...")
     cameras = parse_images_file(images_path)

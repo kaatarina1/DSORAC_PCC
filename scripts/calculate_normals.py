@@ -7,8 +7,8 @@ from pathlib import Path
 from scipy.spatial import cKDTree
 
 name = "ljubljana_3"
-# Poti glede na lokacijo skripte (data/pc/), da deluje ne glede na trenutni direktorij
-base = str(Path(__file__).resolve().parent / "pc") + "/"
+# Poti glede na lokacijo skripte (scripts/ -> data/pc/), da deluje ne glede na trenutni direktorij
+base = str(Path(__file__).resolve().parents[1] / "data" / "pc") + "/"
 
 # Potrebno, da zagotovimo pravilno izvaja tudi če ima LAS datoteka že obstoječe (a napačne/duplikatne) 
 # VLR-je z ekstra dimenzijami, ki bi lahko motili naš izračun normal. 

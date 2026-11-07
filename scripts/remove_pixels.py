@@ -1,7 +1,11 @@
 from PIL import Image
+from pathlib import Path
 import numpy as np
 
-image_path = './images/slika-3_Popravljena.png'
+# Images are in data/images (paths were relative to data/ before this script moved to scripts/)
+images = Path(__file__).resolve().parents[1] / "data" / "images"
+
+image_path = images / "slika-3_Popravljena.png"
 image = Image.open(image_path).convert("RGBA")
 resized_image = image.resize((1024, 512), Image.LANCZOS)
 
@@ -20,12 +24,12 @@ image_99 = apply_random_alpha(resized_image, 0.99)
 
 # Save the images
 paths = [
-    "./images/image4.png",
-    "./images/image4_50_alpha.png",
-    "./images/image4_80_alpha.png",
-    "./images/image4_90_alpha.png",
-    "./images/image4_95_alpha.png",
-    "./images/image4_99_alpha.png",
+    images / "image4.png",
+    images / "image4_50_alpha.png",
+    images / "image4_80_alpha.png",
+    images / "image4_90_alpha.png",
+    images / "image4_95_alpha.png",
+    images / "image4_99_alpha.png",
 ]
 
 resized_image.save(paths[0])

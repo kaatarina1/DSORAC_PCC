@@ -2,7 +2,7 @@ import argparse
 import numpy as np
 import torch
 from scipy.spatial import cKDTree
-from prune_gaussians import save_ply
+from checkpoint_io import save_ply
 
 C0 = 0.28209479177387814   # SH band-0 constant, same as utils/sh_utils.RGB2S
 

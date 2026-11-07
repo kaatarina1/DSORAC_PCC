@@ -57,7 +57,7 @@ def main():
         rendering = render(view, gaussians, pipe, background, separate_sh=SPARSE_ADAM_AVAILABLE)["render"]
         se = ((as_png(rendering) - as_png(view.original_image[0:3])) ** 2).mean(0)   # per-pixel squared error
         name = f"{idx:05d}"
-        # "psnr" holds the MSE, exactly like per_pixel_metrics.py; pipeline.calculateQuality converts it to dB
+        # "psnr" holds the MSE, exactly like per_pixel_metrics.py; gs_pipeline.quality.calculate_quality converts it to dB
         scores[name] = {"psnr": float(se.mean()), "ssim": None, "lpips": None}
         if not args.no_maps:
             np.save(maps_dir / f"{name}.npy", se.cpu().numpy())

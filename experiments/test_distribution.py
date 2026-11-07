@@ -1,15 +1,11 @@
 import torch
 from pathlib import Path
+from gaussian_splatting_utils.checkpoint_io import robust_extent
+
+# Run from the repo root in the gaussian_splatting env: python -m experiments.test_distribution
 
 def get_path(model, checkpoint): 
     return Path(f"output/{model}/chkpnt{checkpoint}.pth")
-
-def robust_extent(xyz, lo_q=0.02, hi_q=0.98):
-    n = xyz.shape[0]
-    sorted_xyz = xyz.sort(dim=0).values
-    lo = sorted_xyz[int(lo_q * (n - 1))]
-    hi = sorted_xyz[int(round(hi_q * (n - 1)))]
-    return torch.linalg.norm(hi - lo).item()
 
 models = ["lego_normals", "bezigrad_normals", "ljubljana_1_normals"]
 checkpoints = [20_000, 25_000, 30_000]

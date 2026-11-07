@@ -6,11 +6,11 @@ from pathlib import Path
 
 import numpy as np
 
-from pipeline import W, H
+from gs_pipeline.config import W, H
 
 # Re-renders a few fixed cameras of an existing dataset, to test renderer changes without regenerating it.
 # The cameras are picked once from data/<scene> and saved to test_views/<scene>.json (edit it to change them).
-#   python test_views.py data/pc/ljubljana_1_normals.las [--count 6] [--ratio 0.25] [--label name]
+#   python -m tests.test_views data/pc/ljubljana_1_normals.las [--count 6] [--ratio 0.25] [--label name]
 
 
 def read_images_txt(path):
@@ -41,7 +41,7 @@ def pick_views(dataset, count, ratio):
         assert np.allclose(-R.T @ t, eye, atol=1e-2), f"{name}: images.txt does not match the file name"
         views.append({"name": name, "eye": eye, "forward": R[2]})
 
-    # generateDataset puts overview cameras (radiusRatio 1) at distance h and quadrant cameras
+    # generate_dataset puts overview cameras (radiusRatio 1) at distance h and quadrant cameras
     # (radiusRatio 0.25) at h / 4, the image index is not reliable because noCams changed between datasets
     dist = np.array([np.linalg.norm(v["eye"]) for v in views])
     for v, d in zip(views, dist):

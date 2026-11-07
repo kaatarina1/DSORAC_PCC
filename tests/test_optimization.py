@@ -86,7 +86,7 @@ def ply_vertex_count(path):
 # ---------- 1-4: unit tests on synthetic data ----------
 
 def test_bilinear(args):
-    from optimization_util import bilinear
+    from gs_pipeline.optimization import bilinear
     img_x = np.tile(np.arange(10, dtype=float), (5, 1))                # img[y, x] = x
     img_y = np.repeat(np.arange(5, dtype=float)[:, None], 10, axis=1)  # img[y, x] = y
     uv = np.array([[2.5, 1.0], [0.0, 0.0], [9.0, 4.0], [3.25, 2.75]])  # includes both corners
@@ -95,7 +95,7 @@ def test_bilinear(args):
     check("bilinear along y", np.allclose(ey, [1, 0, 4, 2.75]), ey)
 
 def test_camera(args):
-    from optimization_util import look_at, project, load_cameras
+    from gs_pipeline.optimization import look_at, project, load_cameras
     target = np.zeros(3)
     for pos in (np.array([3., 2., 5.]), np.array([0., 5., 0.])):    # second one looks straight down
         R, t = look_at(pos, target)
@@ -124,7 +124,7 @@ def test_camera(args):
           and (w2, h2) == (W, H))
 
 def test_visibility(args):
-    from optimization_util import look_at, project, visibility
+    from gs_pipeline.optimization import look_at, project, visibility
     R, t = look_at(np.array([0., 0., 3.]), np.zeros(3))
     for n in (200, 50):
         front, back = plane(n, 0.), plane(n, -1.)
@@ -139,7 +139,7 @@ def test_visibility(args):
                   "(back leaks through the gaps between splats, expected)")
 
 def test_sampling(args):
-    from optimization_util import importance_sample
+    from gs_pipeline.optimization import importance_sample
     E = np.tile([0., 0., 1., 1., 8.], 2000)
     expected = {0.0: [0, 0, .1, .1, .8], 0.5: [.1, .1, .15, .15, .5]}
     with np.errstate(divide="ignore"):
@@ -162,7 +162,7 @@ def test_projection(args):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from PIL import Image
-    from optimization_util import load_cameras, project, visibility
+    from gs_pipeline.optimization import load_cameras, project, visibility
     method_dir, _ = model_paths(args)
     cams = load_cameras(Path(args.model, "cameras.json"))
     n_gt = len(list((method_dir / "gt").glob("*.png")))
@@ -197,7 +197,7 @@ def test_point_error(args):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from optimization_util import load_cameras, compute_point_error
+    from gs_pipeline.optimization import load_cameras, compute_point_error
     method_dir, _ = model_paths(args)
     cams = load_cameras(Path(args.model, "cameras.json"))
     n_maps = len(list((method_dir / args.metric).glob("*.npy")))
@@ -228,7 +228,7 @@ def test_point_error(args):
     print(f"wrote {out / f'point_error_{args.metric}.png'} and .ply")
 
 def test_coverage(args):
-    from optimization_util import read_ply_xyz, uncovered_mask
+    from gs_pipeline.optimization import read_ply_xyz, uncovered_mask
     _, ply = model_paths(args)
     G = read_ply_xyz(ply)
     P_all = np.load(Path(args.model, "points.npy"))
@@ -249,7 +249,7 @@ def test_coverage(args):
 def test_optimize(args):
     import shutil
     from scipy.spatial import cKDTree
-    from optimization_util import optimize, read_ply_xyz
+    from gs_pipeline.optimization import optimize, read_ply_xyz
     method_dir, ply = model_paths(args)
     new_poses, picked = optimize(args.model, method_dir, ply, args.metric, budget_frac=args.budget_frac,
                                  n_views=args.n_views, stride=args.stride)
@@ -279,15 +279,15 @@ def test_optimize(args):
     print(f"wrote {out}")
 
     if args.las and new_poses:
-        from pipeline import captureViews
+        from gs_pipeline.dataset import capture_views
         views_dir = "data/_test_views"
         shutil.rmtree(views_dir, ignore_errors=True)
-        captureViews(args.las, views_dir, new_poses, "POINTS")
+        capture_views(args.las, views_dir, new_poses, "POINTS")
         print(f"rendered the new views into {views_dir}/images, open them and check what they show")
 
 def test_visualize(args):
     # Writes three layers for CloudCompare: error-coloured cloud, picked points, new + existing views
-    from optimization_util import optimize, compute_point_error, load_cameras, look_at
+    from gs_pipeline.optimization import optimize, compute_point_error, load_cameras, look_at
     method_dir, ply = model_paths(args)
     out = out_dir(args.model) / f"visualize_{args.metric}"
     out.mkdir(exist_ok=True)
@@ -377,7 +377,7 @@ TESTS = {
 }
 
 def main():
-    parser = argparse.ArgumentParser(description="Tests for optimization_util.py and add_gaussians.py")
+    parser = argparse.ArgumentParser(description="Tests for gs_pipeline/optimization.py and gaussian_splatting_utils/add_gaussians.py")
     parser.add_argument("test", choices=[*TESTS, "unit"], help="'unit' runs bilinear, camera, visibility, sampling")
     parser.add_argument("--model", help="output/<scene>")
     parser.add_argument("--iteration", type=int, help="selects train/ours_<it> and point_cloud/iteration_<it>")
