@@ -20,3 +20,32 @@ Glavni prispevki tega dela so:
 
 ### Uporaba umetne inteligence
 Pri implementaciji te zaključne naloge so bila uporabljena orogja umetne inteligence predvsem pri izdelavi dela uporabniškega vmesnika s kontrolami za upodabljanje (Control panel), strukturiranih logov pri izvedbi postopkov ter paralelizaciji postopka zajemanja slik. Prav tako smo jo včasih uporabljali za razhroščevanje med razvojem.
+Refactor kode in strukturiranje repozitorija je bilo popolnoma narejeno z uporabo umetne intaligence.
+
+## Namestitev
+
+```bash
+git clone --recursive https://github.com/kaatarina1/DSORAC.git
+# ali, po navadnem kloniranju:
+git submodule update --init --recursive
+
+conda env create -f gaussian-splatting/environment.yml   # okolje gaussian_splatting za 3DGS, vključno z razširitvami CUDA
+npm install                                              # odvisnosti za capture.js (deno task capture)
+```
+
+DXC (`dxcompiler.dll`, `dxil.dll`) gre v `tools/dxc/`.
+
+## Struktura
+
+```
+pipeline.py                  # main(): celoten cevovod, zaženemo iz okolja cevovoda
+gs_pipeline/                 # moduli, ki jih uvozi pipeline.py
+gaussian_splatting_utils/    # skripte, ki tečejo v okolju gaussian_splatting (prek conda run)
+experiments/                 # python -m experiments.<ime>
+tests/                       # python -m tests.<ime>
+configs/  scripts/
+gaussian-splatting/          # podmodul, fork na veji pcc
+```
+
+Primer: `python pipeline.py data/pc/lego_normals.las --compression_ratio 10`.
+Skripte v `experiments/` in `tests/` zaženemo iz korenskega direktorija kot module, npr. `python -m tests.test_optimization unit`.

@@ -3,7 +3,10 @@ import numpy as np
 import torch
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
-from prune_gaussians import robust_extent, save_ply
+from gaussian_splatting_utils.checkpoint_io import robust_extent, save_ply
+
+# Not called by the pipeline. Run from the repo root in the gaussian_splatting env:
+#   python -m experiments.squeeze_gaussians --checkpoint ... --out_checkpoint ... --points ...
 
 def main():
     parser = argparse.ArgumentParser()

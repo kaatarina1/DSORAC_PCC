@@ -1,7 +1,7 @@
+import heapq
 import numpy as np
 from sklearn.cluster import DBSCAN
 from scipy.spatial import cKDTree
-from scipy.ndimage import minimum_filter
 import json
 from pathlib import Path
 import time
@@ -187,8 +187,6 @@ def candidate_views(P, normals, E, K, width, height, cameras, tree, pct=90, eps=
         cands.append((pos, c, R, t))
     log(f"{len(cands)} candidate views after the inside-geometry check")
     return cands
-
-import heapq
 
 def greedy_select(P, normals, E, K, width, height, cands, k=50):
     P_t = to_device(P)

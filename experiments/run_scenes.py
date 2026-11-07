@@ -1,7 +1,7 @@
 """Run pipeline.py for one scene of each type.
 
-python run_scenes.py
-python run_scenes.py --only lego bezigrad --skip_generating
+python -m experiments.run_scenes
+python -m experiments.run_scenes --only lego bezigrad --skip_generating
 
 Each scene runs in its own process, so a failure in one scene does not stop the others.
 """
@@ -12,7 +12,8 @@ import sys
 import time
 from pathlib import Path
 
-from render_eval import compressionRatio, latestGaussianPly
+from gs_pipeline.config import REPO_ROOT
+from gs_pipeline.evaluation import compression_ratio, latest_gaussian_ply
 
 # One scene per type, each has a ground truth folder data/<name>_eval used by pipeline.py
 SCENES = {
@@ -25,11 +26,11 @@ SCENES = {
 def read_scene_results(las_file, start):
     # Same model folder as pipeline.py: output/<las stem>
     model_path = Path("output", Path(las_file).stem)
-    ratio = compressionRatio(las_file, model_path)
+    ratio = compression_ratio(las_file, model_path)
 
     # Mean over the ground truth views, written by gaussian-splatting/utils/eval_views.py.
     # Older files are from a previous run (e.g. evaluation was skipped this time), so they are ignored.
-    metrics_path = model_path / "eval" / latestGaussianPly(model_path).parent.name / "metrics_views.json"
+    metrics_path = model_path / "eval" / latest_gaussian_ply(model_path).parent.name / "metrics_views.json"
     mean = None
     if metrics_path.exists() and metrics_path.stat().st_mtime >= start:
         mean = json.loads(metrics_path.read_text())["mean"]
@@ -45,7 +46,7 @@ def main():
     scene_names = args.only or list(SCENES)
     results = {}
     for name in scene_names:
-        cmd = [sys.executable, "pipeline.py", SCENES[name]] #, "--skip_generating", "--skip_training"
+        cmd = [sys.executable, str(REPO_ROOT / "pipeline.py"), SCENES[name]] #, "--skip_generating", "--skip_training"
         if args.skip_generating:
             cmd.append("--skip_generating")
 

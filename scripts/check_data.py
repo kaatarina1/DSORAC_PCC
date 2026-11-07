@@ -3,8 +3,9 @@ import numpy as np
 import laspy
 import struct
 import io
+from pathlib import Path
 
-name = "./pc/ljubljana_2"
+name = str(Path(__file__).resolve().parents[1] / "data" / "pc" / "ljubljana_2")
 
 def read_data(path):
     with open(path, "rb") as f:

@@ -1,21 +1,21 @@
 """Vary one 3DGS optimisation parameter at a time (others stay at default) and report for each value:
 number of gaussians, compression ratio and mean PSNR / SSIM / LPIPS over the views in <eval_dir>/eval.json.
 
-python param_sweep.py
-python param_sweep.py --skip_generating --iterations 30000
+python -m experiments.param_sweep
+python -m experiments.param_sweep --skip_generating --iterations 30000
 
 Runs that already have results in <sweep_dir>/results.json are skipped, so the sweep can be resumed.
 """
 import argparse
 import json
-import os
-import subprocess
 from pathlib import Path
 
 import numpy as np
 
-from pipeline import W, H, FOV, generateDataset
-from render_eval import readGaussianPly, latestGaussianPly, compressionRatio, evaluate
+from gs_pipeline.config import GS_DIR
+from gs_pipeline.dataset import read_point_cloud, generate_dataset, half_fov_horizontal
+from gs_pipeline.evaluation import read_gaussian_ply, latest_gaussian_ply, compression_ratio, evaluate
+from gs_pipeline.gs_runner import run_in_gs_env
 
 # Defaults from gaussian-splatting/arguments/__init__.py (OptimizationParams)
 DEFAULTS = {
@@ -33,27 +33,23 @@ SWEEP = {
 }
 
 
-def runName(param, value):
+def run_name(param, value):
     return "default" if value == DEFAULTS[param] else f"{param}_{value}"
 
 
 def train(dataset, model_path, extra, iterations):
-    conda = os.environ.get("CONDA_EXE", "conda")
-    cmd = [
-        conda, "run", "-n", "gaussian_splatting", "--no-capture-output",
-        "python", "./gaussian-splatting/train.py", "-s", dataset, "-m", model_path,
-        "--iterations", str(iterations), "--save_iterations", str(iterations),
-        "--disable_viewer", *extra,
-    ]
-    print(" ".join(cmd))
-    subprocess.run(cmd, check=True)
+    args = ["-s", dataset, "-m", model_path,
+            "--iterations", iterations, "--save_iterations", iterations,
+            "--disable_viewer", *extra]
+    print(" ".join(["train.py", *map(str, args)]))
+    run_in_gs_env(GS_DIR / "train.py", *args)
 
 
-def printTable(results):
+def print_table(results):
     print(f"\n{'parameter':<24}{'value':>10}{'gaussians':>12}{'ratio':>9}{'PSNR':>8}{'SSIM':>8}{'LPIPS':>8}")
     for param, values in SWEEP.items():
         for value in values:
-            r = results.get(runName(param, value))
+            r = results.get(run_name(param, value))
             if r:
                 print(f"{param:<24}{value:>10}{r['gaussians']:>12}{r['ratio']:>9.3f}"
                       f"{r['PSNR']:>8.2f}{r['SSIM']:>8.4f}{r['LPIPS']:>8.4f}")
@@ -75,16 +71,15 @@ def main():
     eval_dir = Path(args.eval_dir or f"data/{name}_eval")
 
     if not args.skip_generating:
-        halfV = np.deg2rad(FOV / 2)
-        halfH = np.arctan(np.tan(halfV) * W / H)
-        generateDataset(args.lasFile, dataset, halfH)
+        xyz, _, bb_min, bb_max, _ = read_point_cloud(args.lasFile)
+        generate_dataset(args.lasFile, dataset, half_fov_horizontal(), xyz, bb_min, bb_max, 1)
 
     results_path = sweep_dir / "results.json"
     results = json.loads(results_path.read_text()) if results_path.exists() else {}
 
     for param, values in SWEEP.items():
         for value in values:
-            run = runName(param, value)
+            run = run_name(param, value)
             if run in results:
                 print(f"Skipping {run}, already done")
                 continue
@@ -95,14 +90,14 @@ def main():
             metrics = evaluate(model_path, args.lasFile, eval_dir)["mean"]
             results[run] = {
                 "param": param, "value": value,
-                "gaussians": len(readGaussianPly(latestGaussianPly(model_path))),
-                "ratio": compressionRatio(args.lasFile, model_path),
+                "gaussians": len(read_gaussian_ply(latest_gaussian_ply(model_path))),
+                "ratio": compression_ratio(args.lasFile, model_path),
                 **{k: metrics[k] for k in ("PSNR", "SSIM", "LPIPS")},
             }
             results_path.write_text(json.dumps(results, indent=2))
-            printTable(results)
+            print_table(results)
 
-    printTable(results)
+    print_table(results)
 
 
 if __name__ == "__main__":
