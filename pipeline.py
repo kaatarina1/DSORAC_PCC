@@ -41,6 +41,14 @@ def main():
     with timer.stage("read_point_cloud"):
         xyz, rgb, bb_min, bb_max, normals = read_point_cloud(args.las_file)
 
+    # Fail before training, not in the first optimize step: optimize() scales DBSCAN eps and
+    # the coverage test by the point spacing, so a degenerate cloud would crash there.
+    with timer.stage("check_spacing"):
+        spacing = opt_util.estimate_spacing(xyz)
+        print(f"point spacing {spacing:.4f}", flush=True)
+        if not spacing > 0:
+            raise ValueError(f"point spacing is {spacing} for {args.lasFile}")
+
     sampling_rate = gs_bytes / 8 * args.compression_ratio
 
     with timer.stage("prepare_dataset", regenerate=args.regenerate):

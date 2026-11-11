@@ -13,6 +13,23 @@ _t0 = time.perf_counter()
 def log(msg):
     print(f"[optimize {time.perf_counter() - _t0:7.1f}s] {msg}", flush=True)
 
+def estimate_spacing(P, tree=None, sample_step=100, k=16):
+    """Median distance from a point to its nearest neighbour at a *different* position.
+
+    LAS coordinates are stored as integers (scale 0.01 = 1 cm), so distinct points that
+    fall in the same cell get identical coordinates. A plain k=2 query then returns 0 for
+    every point with a twin, and once that is more than half the points the median is 0.
+    Querying k neighbours and taking the first non-zero distance skips the twins.
+    """
+    tree = cKDTree(P) if tree is None else tree
+    d, _ = tree.query(P[::sample_step], k=k, workers=-1)
+    d = np.where(d > 0, d, np.inf).min(axis=1)   # self and twins are at distance 0
+    d = d[np.isfinite(d)]                         # points with >= k-1 twins give no estimate
+    if len(d) == 0:
+        raise ValueError(f"cannot estimate point spacing: every sampled point has >= {k - 1} "
+                         f"exact duplicates")
+    return float(np.median(d))
+
 def uncovered_mask(P, gauss_xyz, spacing, cover_k=2.0):
     d, _ = cKDTree(gauss_xyz).query(P, workers=-1)
     return d > cover_k * spacing
@@ -258,8 +275,10 @@ def optimize(model_path, method_dir, ply_path, metric, budget_frac=0.05, n_views
     log(f"loaded {len(P_all)} points, using {len(P)} (stride {stride}), normals: {N_all is not None}")
 
     tree = cKDTree(P_all)
-    spacing = np.median(tree.query(P_all[::100], k=2)[0][:, 1])
+    spacing = estimate_spacing(P_all, tree)
     log(f"point spacing {spacing:.4f}")
+    if not spacing > 0:   # also catches NaN; eps and the cover test both scale with spacing
+        raise ValueError(f"point spacing is {spacing}, DBSCAN eps and the cover test would be degenerate")
     cameras = load_cameras(Path(model_path, "cameras.json"))
     log(f"{len(cameras)} cameras")
 
