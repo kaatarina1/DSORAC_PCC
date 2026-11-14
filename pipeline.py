@@ -9,8 +9,9 @@ import numpy as np
 from gs_pipeline import optimization as opt_util
 from gs_pipeline.dataset import read_point_cloud, prepare_dataset, capture_views, half_fov_horizontal
 from gs_pipeline.evaluation import compression_ratio, evaluate, gaussian_count, point_count, gaussian_bytes
-from gs_pipeline.gs_runner import train_gaussians, prune_gaussians, add_gaussians, clean_iteration
-from gs_pipeline.quality import measure, stalled, print_round, print_summary
+from gs_pipeline.gs_runner import (train_gaussians, prune_gaussians, add_gaussians, clean_iteration,
+                                  backup_iteration, restore_iteration)
+from gs_pipeline.quality import measure, stalled, print_round, print_summary, gt_score
 from gs_pipeline.timing import StageTimer
 
 
@@ -26,6 +27,23 @@ def main():
     parser.add_argument("--ratio_tol", type=float, default=0.01, help="r may be this much below r*.")
     parser.add_argument("--sh_degree", type=int, choices=[0, 1, 2, 3], default=3,
                     help="Max SH degree of the Gaussians.")
+    parser.add_argument("--layer_masks", choices=["sam"], default=None,
+                        help="Mask every DSORAC depth layer of every captured view (SAM2, sam2 conda env) "
+                             "before compositing. Default: no masks.")
+    # Ablation switches (run_experiments.py --ablation). Off by default, so normal runs are unchanged.
+    parser.add_argument("--no_new_views", action="store_true", help="Ablation: do not capture new views in the loop.")
+    parser.add_argument("--no_new_points", action="store_true", help="Ablation: do not add new Gaussians in the loop.")
+    parser.add_argument("--tag", default="", help="Suffix for the output folder, e.g. _v1p0s1.")
+    parser.add_argument("--data_dir", help="Work copy of the dataset for this run, default <base dataset>_work. "
+                                           "Separate work copies let several runs of one model run at the same time.")
+    # Off by default: it selects the checkpoint on the GT test views, i.e. model selection on the test set
+    parser.add_argument("--keep_rule", action="store_true",
+                        help="Return the previous checkpoint when a loop makes the GT metric worse (uses GT test views).")
+    # Baseline for the loop: prune once to the target count, train, evaluate, no loop.
+    parser.add_argument("--one_shot", action="store_true",
+                        help="Baseline: one pruning step to the target count, then one training run, no loop.")
+    parser.add_argument("--one_shot_iterations", type=int, default=3_000,
+                        help="With --one_shot: training iterations after the pruning step (default: one loop round).")
 
     args = parser.parse_args()
     half_h = half_fov_horizontal()
@@ -33,9 +51,11 @@ def main():
     gs_bytes = gaussian_bytes(args.sh_degree)
 
     name = Path(args.las_file).stem
-    base_dir = str(Path(args.work_root, name))
-    data_dir = f"{base_dir}_work"
-    model_path = str(Path(args.work_root, "output", f"{name}_sh{args.sh_degree}_cr{int(args.compression_ratio)}"))
+    # SAM-masked base dataset in its own folder, so switching masks on/off never regenerates the other one
+    base_dir = str(Path(args.work_root, name + ("_sam" if args.layer_masks else "")))
+    data_dir = args.data_dir or f"{base_dir}_work"
+    model_path = str(Path(args.work_root, "output",
+                          f"{name}_sh{args.sh_degree}_cr{int(args.compression_ratio)}{args.tag}"))
     timer = StageTimer(Path(model_path, "timings.json"))
 
     with timer.stage("read_point_cloud"):
@@ -47,12 +67,13 @@ def main():
         spacing = opt_util.estimate_spacing(xyz)
         print(f"point spacing {spacing:.4f}", flush=True)
         if not spacing > 0:
-            raise ValueError(f"point spacing is {spacing} for {args.lasFile}")
+            raise ValueError(f"point spacing is {spacing} for {args.las_file}")
 
     sampling_rate = gs_bytes / 8 * args.compression_ratio
 
     with timer.stage("prepare_dataset", regenerate=args.regenerate):
-        prepare_dataset(args.las_file, base_dir, data_dir, half_h, xyz, rgb, bb_min, bb_max, sampling_rate, args.regenerate)
+        prepare_dataset(args.las_file, base_dir, data_dir, half_h, xyz, rgb, bb_min, bb_max, sampling_rate, args.regenerate,
+                        layer_masks=args.layer_masks)
 
     checkpoint = 17_000
     with timer.stage("train_initial", iterations=checkpoint):
@@ -65,9 +86,41 @@ def main():
 
     # evaluate against ground truth
     eval_dir = Path(args.eval_dir or Path(args.work_root, f"{name}_eval"))
-    if (eval_dir / "eval.json").exists():
+    has_gt = (eval_dir / "eval.json").exists()
+    gt_last = None   # GT metrics of the current checkpoint
+    if has_gt:
         with timer.stage("evaluate_gt", checkpoint=checkpoint):
-            evaluate(model_path, args.las_file, eval_dir, args.sh_degree)
+            gt_last = evaluate(model_path, args.las_file, eval_dir, args.sh_degree)
+
+    n_points = point_count(args.las_file)
+    n_target = int(n_points * 8 / (gs_bytes * args.compression_ratio))
+
+    if args.one_shot:
+        # Same thresholds as the first loop prune, plus random removal down to n_target, in one step
+        with timer.stage("prune", loop=0, phase="one_shot"):
+            prune_gaussians(checkpoint, model_path, (0.05, 3), 0.2, n_target)
+        end = checkpoint + args.one_shot_iterations
+        with timer.stage("train", loop=0, start=checkpoint, end=end):
+            train_gaussians(model_path, data_dir, -1, f"{model_path}/chkpnt{checkpoint}.pth", [end],
+                            sh_degree=args.sh_degree)
+        clean_iteration(model_path, checkpoint)   # evaluate() and compression_ratio() read the latest PLY
+        r = compression_ratio(args.las_file, model_path, args.sh_degree)
+        gt = None
+        if has_gt:
+            with timer.stage("evaluate_gt", loop=0, checkpoint=end):
+                gt = evaluate(model_path, args.las_file, eval_dir, args.sh_degree)
+        # Own summary: print_summary needs a non-empty loop history
+        Path(model_path, "loop_summary.json").write_text(json.dumps(
+            {"reason": "one_shot", "r_star": args.compression_ratio, "r": r, "N": gaussian_count(model_path),
+             "final_iteration": end, "gt_initial": gt_last["mean"] if gt_last else None,
+             "gt": gt["mean"] if gt else None}, indent=2))
+        print(f"one shot: N={gaussian_count(model_path)}  r={r:.3f}  "
+              f"GT={gt['mean'] if gt else None}", flush=True)
+        for f in ["points.npy", "colors.npy", "normals.npy", *Path(model_path).glob("events.out.tfevents.*")]:
+            Path(model_path, f).unlink(missing_ok=True)
+        timer.save()
+        timer.print_summary()
+        return
 
     n_base = len(list(Path(data_dir, "images").glob("*.png")))   # before any capture_views
     base_names = [f"{i:05d}" for i in range(n_base)]
@@ -81,8 +134,6 @@ def main():
     new_factor = 0.1
     n_views = 20
     summary_path = Path(model_path, "loop_summary.json")
-    n_points = point_count(args.las_file)
-    n_target = int(n_points * 8 / (gs_bytes * args.compression_ratio))
     for loop in range(args.max_loops):
         loop_start = time.perf_counter()
         r = compression_ratio(args.las_file, model_path, args.sh_degree)
@@ -94,7 +145,16 @@ def main():
         phase = "improve" if r_ok else "compress"
         history.append({"loop": loop, "checkpoint": checkpoint, "phase": phase,
                     "N": N, "r": r, "q": q, "p10": p10, "min_opacity": min_opacity})
+        if gt_last is not None:
+            history[-1]["gt"] = gt_last["mean"]
         print_round(history[-1], args.error_metric)
+
+        # If this checkpoint already meets the compression target, it is a valid result: keep an untouched copy,
+        # so it can be returned when the next loop makes the GT metric worse.
+        # Only with --keep_rule; keep_previous also gates the restore after training below.
+        keep_previous = args.keep_rule and has_gt and r_ok
+        if keep_previous:
+            backup_iteration(model_path, checkpoint)
 
         with timer.stage("prune", loop=loop, phase=phase):
             if phase == "compress":
@@ -108,6 +168,7 @@ def main():
                 n_removed = N - count
                 add_frac = new_factor * n_removed / count
                 new_factor = new_factor - 0.03 if new_factor > 0 else 0
+                new_factor = max(new_factor - 0.03, 0)
                 n_views = 10
             else:
                 prune_gaussians(checkpoint, model_path, (0.02, 4), 0.15)
@@ -130,27 +191,44 @@ def main():
 
         indices_path = Path(model_path, f"add_idx_loop{loop}.npy")
         np.save(indices_path, picked)
-        with timer.stage("add_gaussians", loop=loop, n_added=int(len(picked))):
-            add_gaussians(checkpoint, model_path, indices_path)
+        if not args.no_new_points:
+            with timer.stage("add_gaussians", loop=loop, n_added=int(len(picked))):
+                add_gaussians(checkpoint, model_path, indices_path)
 
-        if new_poses:
+        if new_poses and not args.no_new_views:
             with timer.stage("capture_views", loop=loop, n_views=len(new_poses)):
-                capture_views(args.las_file, data_dir, new_poses, "POINTS")
+                capture_views(args.las_file, data_dir, new_poses, "POINTS", layer_masks=args.layer_masks)
 
-        with timer.stage("train", loop=loop, start=checkpoint, end=checkpoint + 6_000):
-            train_gaussians(model_path, data_dir, checkpoint + 6_000,
-                            f"{model_path}/chkpnt{checkpoint}.pth", [checkpoint + 6_000], sh_degree=args.sh_degree)
+        with timer.stage("train", loop=loop, start=checkpoint, end=checkpoint + 3_000):
+            train_gaussians(model_path, data_dir, checkpoint + 3_000,
+                            f"{model_path}/chkpnt{checkpoint}.pth", [checkpoint + 3_000], sh_degree=args.sh_degree)
         clean_iteration(model_path, checkpoint)
-        checkpoint += 6_000
+        prev_checkpoint, checkpoint = checkpoint, checkpoint + 3_000
 
-        if (eval_dir / "eval.json").exists():
+        went_back = False
+        if has_gt:
             with timer.stage("evaluate_gt", loop=loop, checkpoint=checkpoint):
-                evaluate(model_path, args.las_file, eval_dir, args.sh_degree)
+                gt_new = evaluate(model_path, args.las_file, eval_dir, args.sh_degree)
+            # Both checkpoints meet the compression target and the new one is worse on GT -> keep the previous one
+            if keep_previous and compression_ratio(args.las_file, model_path, args.sh_degree) >= r_low \
+                    and gt_score(gt_new, args.error_metric) < gt_score(gt_last, args.error_metric):
+                restore_iteration(model_path, prev_checkpoint, checkpoint)
+                history[-1]["rejected"] = {"checkpoint": checkpoint, "gt": gt_new["mean"]}
+                key = args.error_metric.upper()
+                reason = (f"GT {key} dropped {gt_last['mean'][key]:.4f} -> {gt_new['mean'][key]:.4f} at iteration "
+                          f"{checkpoint}, kept iteration {prev_checkpoint}")
+                print(f"[keep] {reason}", flush=True)
+                checkpoint = prev_checkpoint
+                went_back = True
+            else:
+                gt_last = gt_new
 
         history[-1]["seconds"] = round(time.perf_counter() - loop_start, 2)
         print(f"[time] loop {loop}: {history[-1]['seconds']:.1f}s", flush=True)
         summary_path.write_text(json.dumps({"history": history}, indent=2))
 
+        if went_back:
+            break
         if stalled(history):
             reason = f"No progression - quality converged {phase}"
             break
@@ -159,6 +237,7 @@ def main():
             break
 
     Path(model_path, f"chkpnt{checkpoint}.pth").unlink(missing_ok=True)
+    shutil.rmtree(Path(model_path, "previous_model"), ignore_errors=True)
     for f in ["points.npy", "colors.npy", "normals.npy", *Path(model_path).glob("add_idx_loop*.npy"),
                 *Path(model_path).glob("events.out.tfevents.*")]:
         Path(model_path, f).unlink(missing_ok=True)

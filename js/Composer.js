@@ -200,6 +200,52 @@ export class Composer {
 		this.depths.push(depth);
 	}
 
+	// Debug / analysis only: copies every layer back to the CPU, so the layers can be masked and
+	// re-composited offline (experiments/sam_layer_masks.py). Must run before compositeDepths(),
+	// which destroys the layer textures. Per layer returns [H, W, 6] float32:
+	// reconstruction rgb, sdf.a, density.a, points.a - exactly the inputs composite.wgsl reads.
+	async readLayers() {
+		const w = this.width, h = this.height;
+		const bytesPerRow = Math.ceil(w * 16 / 256) * 256;   // WebGPU needs a multiple of 256
+		const readTexture = async (texture) => {
+			const buffer = this.device.createBuffer({
+				size: bytesPerRow * h,
+				usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+			});
+			const encoder = this.device.createCommandEncoder();
+			encoder.copyTextureToBuffer({ texture }, { buffer, bytesPerRow, rowsPerImage: h }, [w, h, 1]);
+			this.device.queue.submit([encoder.finish()]);
+			await buffer.mapAsync(GPUMapMode.READ);
+			const padded = new Float32Array(buffer.getMappedRange());
+			const out = new Float32Array(w * h * 4);
+			for (let y = 0; y < h; y++) {
+				out.set(padded.subarray(y * bytesPerRow / 4, y * bytesPerRow / 4 + w * 4), y * w * 4);
+			}
+			buffer.unmap();
+			buffer.destroy();
+			return out;
+		};
+
+		const layers = [];
+		for (let i = 0; i < this.reconstructions.length; i++) {
+			const rec = await readTexture(this.reconstructions[i]);
+			const sdf = await readTexture(this.sdfs[i]);
+			const den = await readTexture(this.densities[i]);
+			const pts = await readTexture(this.depthPoints[i]);
+			const out = new Float32Array(w * h * 6);
+			for (let p = 0; p < w * h; p++) {
+				out[p * 6] = rec[p * 4];
+				out[p * 6 + 1] = rec[p * 4 + 1];
+				out[p * 6 + 2] = rec[p * 4 + 2];
+				out[p * 6 + 3] = sdf[p * 4 + 3];
+				out[p * 6 + 4] = den[p * 4 + 3];
+				out[p * 6 + 5] = pts[p * 4 + 3];
+			}
+			layers.push(out);
+		}
+		return { layers, depths: [...this.depths], radiusRatio: this.radiusRatio };
+	}
+
 	async compositeDepths() {
 		const reconstructionTextures = this.device.createTexture({
 			size: {

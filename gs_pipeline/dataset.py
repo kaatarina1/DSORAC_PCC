@@ -10,9 +10,26 @@ import numpy as np
 from gs_pipeline.config import FOV, W, H, REPO_ROOT
 
 
-def run_capture(*args):
+LAYER_MASK_ENV = "sam2"
+
+
+def run_capture(out, *args, layer_masks=None):
     # "deno task capture" is defined in deno.json, so it has to run from the repo root
-    subprocess.run(["deno", "task", "capture", *map(str, args)], check=True, cwd=REPO_ROOT)
+    dump = ["--dumpLayers=1"] if layer_masks else []
+    subprocess.run(["deno", "task", "capture", str(out), *map(str, args), *dump], check=True, cwd=REPO_ROOT)
+    if layer_masks:
+        apply_layer_masks(out, layer_masks)
+
+
+def apply_layer_masks(out, method):
+    # Masks every depth layer of the images just captured into <out> and re-composites them
+    # (gs_pipeline/layer_masks.py). Runs in its own env because SAM2 needs a newer torch.
+    if method != "sam":
+        raise ValueError(f"unknown layer mask method {method!r}")
+    conda = os.environ.get("CONDA_EXE", "conda")
+    subprocess.run([conda, "run", "-n", LAYER_MASK_ENV, "--no-capture-output",
+                    "python", "-m", "gs_pipeline.layer_masks", str(Path(out).resolve())],
+                   check=True, cwd=REPO_ROOT)
 
 
 def radius_ratio(data_dir, ratios_for_new):
@@ -67,7 +84,7 @@ def floor_height(xyz, cx, cz, radius, q=2.0):
     return float(np.percentile(ys, q))
 
 
-def capture_views(las_file, out, poses, mode="BILLBOARDS"):
+def capture_views(las_file, out, poses, mode="BILLBOARDS", layer_masks=None):
     # All poses in one deno run, so the renderer and LAS are loaded only once
     Path(out).mkdir(parents=True, exist_ok=True)
     poses_path = Path(out, "poses.json")
@@ -81,6 +98,7 @@ def capture_views(las_file, out, poses, mode="BILLBOARDS"):
         f"--poses={poses_path.resolve()}",
         f"--mode={mode}",
         "--pointSize=0.2",
+        layer_masks=layer_masks,
     )
     radius_ratio(out, lambda n: [p[2] for p in poses])
 
@@ -101,7 +119,7 @@ def half_fov_horizontal():
     return np.arctan(np.tan(np.deg2rad(FOV / 2)) * W / H)
 
 
-def generate_dataset(path, out, alpha, positions, bb_min, bb_max, sampling_rate):
+def generate_dataset(path, out, alpha, positions, bb_min, bb_max, sampling_rate, layer_masks=None):
     # capture.js appends to an existing dataset, so start from an empty folder
     if Path(out).exists():
         shutil.rmtree(out, ignore_errors=True)
@@ -142,6 +160,7 @@ def generate_dataset(path, out, alpha, positions, bb_min, bb_max, sampling_rate)
             "--fullSphera=1",
             "--radiusRatio=1",
             f"--samplingRate={sampling_rate}",
+            layer_masks=layer_masks,
         )
         radius_ratio(out, lambda n: [1.0] * n)
     else:
@@ -160,6 +179,7 @@ def generate_dataset(path, out, alpha, positions, bb_min, bb_max, sampling_rate)
             f"--radius={h}",
             "--radiusRatio=1",
             f"--samplingRate={sampling_rate}",
+            layer_masks=layer_masks,
         )
         radius_ratio(out, lambda n: [1.0] * n)
         # Quadrants around the centroid, each target is the centroid of the points in that quadrant
@@ -188,17 +208,21 @@ def generate_dataset(path, out, alpha, positions, bb_min, bb_max, sampling_rate)
                     f"--radius={hq}",
                     f"--radiusRatio={ratio}",
                     f"--samplingRate={sampling_rate}",
+                    layer_masks=layer_masks,
                 )
                 radius_ratio(out, lambda n: [ratio] * n)
 
 
-def prepare_dataset(las_file, base_dir, work_dir, alpha, xyz, rgb, bb_min, bb_max, sampling_rate, regenerate=False):
+def prepare_dataset(las_file, base_dir, work_dir, alpha, xyz, rgb, bb_min, bb_max, sampling_rate, regenerate=False,
+                    layer_masks=None):
     # Base dataset is generated once and never modified; each run works on a copy.
     # The "lasFile" key must stay as it is, otherwise existing markers no longer match and every dataset is regenerated.
     params = {"lasFile": str(Path(las_file).resolve()), "W": W, "H": H, "FOV": FOV}
+    if layer_masks:   # only added when set, so markers of unmasked datasets still match
+        params["layerMasks"] = layer_masks
     marker = Path(base_dir, "dataset_params.json")
     if regenerate or not marker.exists() or json.loads(marker.read_text()) != params:
-        generate_dataset(las_file, base_dir, alpha, xyz, bb_min, bb_max, max(1, int(sampling_rate)))
+        generate_dataset(las_file, base_dir, alpha, xyz, bb_min, bb_max, max(1, int(sampling_rate)), layer_masks)
         marker.write_text(json.dumps(params, indent=2))
     else:
         print(f"Reusing dataset {base_dir}")

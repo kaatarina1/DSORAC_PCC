@@ -187,11 +187,32 @@ export function computeOrthoTopDownMatrix(eyeY, panX, panZ, zoom, canvas, bbMin,
 	return { viewMatrix, projectionMatrix, projectionViewMatrix, near, far };
 }
 
-export function computeSphericalCameraMatrix(eye, bbMin, bbMax, yawDeg) {
-	let viewMatrix = mat4.lookAt(eye, [eye[0], eye[1], eye[2] - 1], [0, 1, 0]);
-	if (yawDeg && yawDeg !== 0) {
-		viewMatrix = mat4.multiply(mat4.rotateY(yawDeg * Math.PI/180), viewMatrix);
-	}
+// Port of rotate_frame in gaussian_splatting_utils/render_equirect.py: rotation vector [roll, pitch, yaw] in degrees,
+// given in the camera's own (forward, right, up) basis, applied as one rotation (Rodrigues' formula).
+function rotateFrame(fwd, up, rotationFixDeg) {
+	const w = rotationFixDeg.map((d) => d * Math.PI / 180);
+	const angle = Math.hypot(...w);
+	if (angle === 0) return [fwd, up];
+	const k = w.map((v) => v / angle);
+	const K = [[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]];
+	const s = Math.sin(angle), c1 = 1 - Math.cos(angle);
+	const R = [0, 1, 2].map((i) => [0, 1, 2].map((j) =>
+		(i === j ? 1 : 0) + s * K[i][j] + c1 * (K[i][0] * K[0][j] + K[i][1] * K[1][j] + K[i][2] * K[2][j])));
+	const right = mat4.cross(fwd, up);                      // render_equirect: right = cross(fwd, up)
+	const basis = [fwd, right, up];
+	const row = (i) => [0, 1, 2].map((a) => R[i][0] * basis[0][a] + R[i][1] * basis[1][a] + R[i][2] * basis[2][a]);
+	return [row(0), row(2)];                                // rows of R @ [fwd; right; up]
+}
+
+export function computeSphericalCameraMatrix(eye, bbMin, bbMax, yawDeg, rotationFixDeg = null) {
+	// Camera frame as in gaussian_splatting_utils/render_equirect.py render_panorama, so DSORAC panoramas line up
+	// with the 3DGS eval renders: forward = (sin yaw, 0, -cos yaw), up = +Y, then the optional tilt correction.
+	// Without the correction this is the same matrix as rotateY(yaw) * lookAt(eye, eye - Z, +Y).
+	const yaw = (yawDeg ?? 0) * Math.PI / 180;
+	let fwd = [Math.sin(yaw), 0, -Math.cos(yaw)];
+	let up = [0, 1, 0];
+	if (rotationFixDeg) [fwd, up] = rotateFrame(fwd, up, rotationFixDeg);
+	const viewMatrix = mat4.lookAt(eye, [eye[0] + fwd[0], eye[1] + fwd[1], eye[2] + fwd[2]], up);
 
 	let far = 0;
 	for (let xi = 0; xi <= 1; xi++) {

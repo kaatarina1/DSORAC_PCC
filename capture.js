@@ -60,13 +60,15 @@ if (type === "fibonacci") {
             useReconstruction: args.useReconstruction === 0 ? false : true,
             pointSize: args.pointSize ?? 0.2,
             filename: `${String(index).padStart(4, "0")}_${pose[0]}_${pose[1]}_${pose[2]}_${mode}.png`,
-            radiusRatio: args.radiusRatio ?? 1
+            radiusRatio: args.radiusRatio ?? 1,
+            dumpLayers: Boolean(args.dumpLayers),
         };
         try {
             index++;
-            const { imageIndex, rgba, metadata } = await renderImage(task);
+            const { imageIndex, rgba, metadata, layerDump } = await renderImage(task);
             const png = encode({ width: metadata.width, height: metadata.height, data: rgba, channels: 4 });
             await Deno.writeFile(`${outPath}/images/${metadata.filename}`, png);
+            if (layerDump) await writeLayerDump(metadata, layerDump);
             results.push({...metadata, imageId: imageIndex + 1});
 
             const done = results.length + failed;
@@ -86,7 +88,9 @@ if (type === "fibonacci") {
         }
     }
 } else {
-    // --poses file.json: [{ "eye": [x, y, z], "target": [x, y, z] }, ...] rendered in one run
+    // --poses file.json: [{ "eye": [x, y, z], "target": [x, y, z] }, ...] rendered in one run.
+    // A pose may also set the eval-camera fields of renderImage: projection ("PERSPECTIVE" | "ORTHOGRAPHIC" |
+    // "SPHERICAL"), eyeY/panX/panZ/zoom (orthographic), yawDeg/rotationFixDeg (spherical).
     let poses;
     if (args.poses) {
         poses = JSON.parse(await Deno.readTextFile(args.poses));
@@ -103,7 +107,7 @@ if (type === "fibonacci") {
     if (existing) console.log(`Dataset exists - appending after image ${startIndex}`);
 
     let index = startIndex;
-    for (const { eye, target, radiusRatio } of poses) {
+    for (const { eye, target, radiusRatio, fovDeg, ...camera } of poses) {
         const task = {
             imageIndex: index,
             cameraPosition: eye,
@@ -113,12 +117,16 @@ if (type === "fibonacci") {
             pointSize: args.pointSize ?? 0.2,
             filename: `${String(index).padStart(4, "0")}_${eye[0]}_${eye[1]}_${eye[2]}_${mode}.png`,
             radiusRatio: radiusRatio ?? args.radiusRatio ?? 1,
+            ...(fovDeg !== undefined && { fovDeg }),   // otherwise renderImage's default (45)
+            ...pick(camera, ["projection", "eyeY", "panX", "panZ", "zoom", "yawDeg", "rotationFixDeg"]),
+            dumpLayers: Boolean(args.dumpLayers),
         };
         try {
             index++;
-            const { imageIndex, rgba, metadata } = await renderImage(task);
+            const { imageIndex, rgba, metadata, layerDump } = await renderImage(task);
             const png = encode({ width: metadata.width, height: metadata.height, data: rgba, channels: 4 });
             await Deno.writeFile(`${outPath}/images/${metadata.filename}`, png);
+            if (layerDump) await writeLayerDump(metadata, layerDump);
             results.push({...metadata, imageId: imageIndex + 1});
 
             const done = results.length + failed;
@@ -143,6 +151,29 @@ cleanup();
 
 console.log(`Done: ${results.length} images in ${((performance.now() - start) / 1000).toFixed(1)}s`);
 if (failed > 0) Deno.exit(1);
+
+// --dumpLayers: <out>/layers/<image>.bin is float32 [layers, H, W, 6] (rgb, sdf, density, points
+// alpha, in composite order), <image>.json describes it.
+async function writeLayerDump(metadata, { layers, depths, radiusRatio }) {
+    const dir = `${outPath}/layers`;
+    await Deno.mkdir(dir, { recursive: true });
+    const stem = metadata.filename.replace(/\.png$/, "");
+    const file = await Deno.open(`${dir}/${stem}.bin`, { write: true, create: true, truncate: true });
+    for (const layer of layers) {
+        const bytes = new Uint8Array(layer.buffer, layer.byteOffset, layer.byteLength);
+        for (let off = 0; off < bytes.length; off += await file.write(bytes.subarray(off)));
+    }
+    file.close();
+    await Deno.writeTextFile(`${dir}/${stem}.json`, JSON.stringify({
+        width: metadata.width, height: metadata.height, fovDeg: metadata.fovDeg,
+        layers: layers.length, channels: ["r", "g", "b", "sdf", "density", "points"],
+        depths, radiusRatio, image: metadata.filename,
+    }, null, 2));
+}
+
+function pick(obj, keys) {
+    return Object.fromEntries(keys.filter((k) => obj[k] !== undefined).map((k) => [k, obj[k]]));
+}
 
 async function readTxtIfExists(path) {
     try {

@@ -404,7 +404,9 @@ export async function renderImage(params, { onProgress } = {}) {
             pointSize = 0.01,
             fovDeg = 45,
             radiusRatio = 1,
+            dumpLayers = false,   // also return the DSORAC depth layers (see Composer.readLayers)
         } = params;
+        let layerDump = null;
 
         let pipeline;
         if (mode === "POINTS") {
@@ -430,7 +432,7 @@ export async function renderImage(params, { onProgress } = {}) {
             cameraDirOrPosition = mat4.normalize([0, 1, 0]); // top-down
         } else if (params.projection === "SPHERICAL") {
             isSpherical = true;
-            ({ viewMatrix, far } = computeSphericalCameraMatrix(cameraPosition, bbMin, bbMax, params.yawDeg));
+            ({ viewMatrix, far } = computeSphericalCameraMatrix(cameraPosition, bbMin, bbMax, params.yawDeg, params.rotationFixDeg));
             projectionViewMatrix = mat4.identity();
             near = 0.01;
         } else {
@@ -505,7 +507,9 @@ export async function renderImage(params, { onProgress } = {}) {
 
             // Zagotovimo, da so vsi GPU ukazi zaključeni pred kompozicijo
             await device.queue.onSubmittedWorkDone();
-            
+
+            if (dumpLayers) layerDump = await composer.readLayers();
+
             outputData = await composer.compositeDepths(composer);
         } else {
             onProgress?.({
@@ -541,9 +545,10 @@ export async function renderImage(params, { onProgress } = {}) {
         await device.queue.onSubmittedWorkDone();
 
         console.log(`✅ Image ${imageIndex} completed successfully`);
-        return { 
+        return {
             imageIndex,
             rgba,
+            layerDump,
             metadata: { quat, t, fx, fy, cx, cy, width, height, fovDeg, density, 
                 filename: params.filename ?? `image_${imageIndex + 1}_${targetPosition.join("_")}.png`,
             },

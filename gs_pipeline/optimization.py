@@ -178,7 +178,7 @@ def look_at(cam_pos, target, up=np.array([0, 1, 0])):
     return R, -R @ cam_pos
 
 def candidate_views(P, normals, E, K, width, height, cameras, tree, pct=90, eps=0.05, 
-                    min_samples=20, d_minmax=(5.0, 10.0), margin=2.0, k = 5):
+                    min_samples=20, d_minmax=(5.0, 200.0), margin=2.0, k = 5):
     hi = np.where(E > np.percentile(E, pct))[0]
     log(f"DBSCAN on {len(hi)} high-error points (eps {eps:.4f})")
     labels = DBSCAN(eps=eps, min_samples=min_samples, n_jobs=-1).fit_predict(P[hi])

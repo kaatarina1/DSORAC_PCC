@@ -20,6 +20,23 @@ def clean_iteration(model_path, iteration):
     shutil.rmtree(Path(model_path, "point_cloud", f"iteration_{iteration}"), ignore_errors=True)
 
 
+def backup_iteration(model_path, iteration):
+    # prune_gaussians / add_gaussians rewrite point_cloud/iteration_<n> in place, so the model as it was
+    # trained and evaluated only survives as this copy
+    src = Path(model_path, "point_cloud", f"iteration_{iteration}")
+    dst = Path(model_path, "previous_model", src.name)
+    shutil.rmtree(dst.parent, ignore_errors=True)
+    shutil.copytree(src, dst)
+
+
+def restore_iteration(model_path, iteration, discard):
+    # Drop iteration <discard> and put the backed up iteration <iteration> back as the latest model
+    clean_iteration(model_path, discard)
+    shutil.move(Path(model_path, "previous_model", f"iteration_{iteration}"),
+                Path(model_path, "point_cloud", f"iteration_{iteration}"))
+    shutil.rmtree(Path(model_path, "previous_model"), ignore_errors=True)
+
+
 def train_gaussians(model_path, data_dir, checkpoint=-1, checkpoint_model="", iterations=(), sh_degree=3):
     args = [
         "-s", data_dir, "-m", model_path,

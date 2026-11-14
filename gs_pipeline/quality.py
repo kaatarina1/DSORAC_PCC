@@ -33,12 +33,21 @@ def measure(model_path, checkpoint, data_dir, metric, names=None, save_maps=Fals
 def stalled(history):
     phase = history[-1]["phase"]
     steps = [(a, b) for a, b in zip(history, history[1:]) if a["phase"] == phase]
-    if len(steps) < 3:
+    if len(steps) < 2:
         return False
     recent = steps[-3:]
     if phase == "compress":
-        return all((b["r"] - a["r"]) / a["r"] < 0.02 for a, b in recent)
+        return False
     return all((b["q"] - a["q"]) < 0.1 for a, b in recent)
+
+
+GT_KEYS = {"psnr": "PSNR", "ssim": "SSIM", "lpips": "LPIPS"}
+
+
+def gt_score(metrics, metric):
+    # Mean ground truth metric of an evaluate() result, signed so that higher is always better
+    v = metrics["mean"][GT_KEYS[metric]]
+    return -v if metric == "lpips" else v
 
 
 def show_quality(q, metric):
